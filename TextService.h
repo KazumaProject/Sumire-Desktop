@@ -15,6 +15,7 @@
 
 #ifndef TEXTSERVICE_H
 #define TEXTSERVICE_H
+#include "ComposingText.h"
 
 class CLangBarItemButton;
 class CCandidateList;
@@ -147,6 +148,8 @@ private:
 
     // the candidate list object.
     CCandidateList *_pCandidateList;
+
+    ComposingText _composingText;
 
     LONG _cRef;     // COM ref count
 };

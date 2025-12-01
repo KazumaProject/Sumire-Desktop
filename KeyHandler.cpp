@@ -71,6 +71,32 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
 
 }
 
+// 半角英数字 → 全角英数字 に変換するヘルパー
+static WCHAR ToFullWidth(WCHAR ch)
+{
+    // 数字
+    if (ch >= L'0' && ch <= L'9')
+    {
+        return (WCHAR)(0xFF10 + (ch - L'0'));   // '０'～'９'
+    }
+
+    // 大文字英字
+    if (ch >= L'A' && ch <= L'Z')
+    {
+        return (WCHAR)(0xFF21 + (ch - L'A'));   // 'Ａ'～'Ｚ'
+    }
+
+    // 小文字英字（必要なら）
+    if (ch >= L'a' && ch <= L'z')
+    {
+        return (WCHAR)(0xFF41 + (ch - L'a'));   // 'ａ'～'ｚ'
+    }
+
+    // それ以外はそのまま
+    return ch;
+}
+
+
 //+---------------------------------------------------------------------------
 //
 // IsRangeCovered
@@ -106,59 +132,99 @@ BOOL IsRangeCovered(TfEditCookie ec, ITfRange *pRangeTest, ITfRange *pRangeCover
 //
 //----------------------------------------------------------------------------
 
-HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext *pContext, WPARAM wParam)
+HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
 {
-    ITfRange *pRangeComposition;
+    ITfRange* pRangeComposition = nullptr;
     TF_SELECTION tfSelection;
-    ULONG cFetched;
-    WCHAR ch;
-    BOOL fCovered;
+    ULONG cFetched = 0;
+    BOOL fCovered = FALSE;
 
-    // Start the new compositon if there is no composition.
+    // 1. Composition が無ければ開始する
     if (!_IsComposing())
-        _StartComposition(pContext);
-
-
-    //
-    // Assign VK_ value to the char. So the inserted the character is always
-    // uppercase.
-    //
-    ch = (WCHAR)wParam;
-
-    // first, test where a keystroke would go in the document if we did an insert
-    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK || cFetched != 1)
-        return S_FALSE;
-
-    // is the insertion point covered by a composition?
-    if (_pComposition->GetRange(&pRangeComposition) == S_OK)
     {
-        fCovered = IsRangeCovered(ec, tfSelection.range, pRangeComposition);
-
-        pRangeComposition->Release();
-
-        if (!fCovered)
-        {
-            goto Exit;
-        }
+        _StartComposition(pContext);   // 戻り値は気にしない
+        _composingText.Reset();        // 新しく始めたタイミングで ComposingText もリセット
     }
 
-    // insert the text
-    // we use SetText here instead of InsertTextAtSelection because we've already started a composition
-    // we don't want to the app to adjust the insertion point inside our composition
-    if (tfSelection.range->SetText(ec, 0, &ch, 1) != S_OK)
-        goto Exit;
+    // 2. 入力されたキーを文字に変換（元コードと同じく VK → WCHAR）
+    WCHAR ch = (WCHAR)wParam;
 
-    // update the selection, we'll make it an insertion point just past
-    // the inserted text.
-    tfSelection.range->Collapse(ec, TF_ANCHOR_END);
-    pContext->SetSelection(ec, 1, &tfSelection);
+    // ★ ここで半角 → 全角に変換
+    ch = ToFullWidth(ch);
+
+    // 3. 現在の選択範囲（キャレット位置）を取得
+    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK ||
+        cFetched != 1)
+    {
+        return S_FALSE;
+    }
+
+    // 4. 今のキャレット位置が composition の中かどうか確認
+    if (_pComposition != nullptr && _pComposition->GetRange(&pRangeComposition) == S_OK)
+    {
+        fCovered = IsRangeCovered(ec, tfSelection.range, pRangeComposition);
+    }
+
+    if (!fCovered)
+    {
+        if (pRangeComposition)
+        {
+            pRangeComposition->Release();
+        }
+        tfSelection.range->Release();
+        return S_OK;
+    }
+
+    // 5. ComposingText の RawText に 1 文字追加
+    //
+    //    本当は「RawCursor の位置に挿入」が理想ですが、
+    //    まずは「常に末尾に追加する」簡易版とします。
+    //    （RawCursor は常に末尾＝length になります）
+    //
+    _composingText.InsertCharAtEnd(ch);
+
+    // Raw のカーソル位置を末尾にそろえる
+    LONG rawLen = (LONG)_composingText.GetRawText().size();
+    _composingText.SetRaw(_composingText.GetRawText(), rawLen);
+
+    // 6. RawText → SurfaceText へ変換
+    //
+    // TODO:
+    //   - RawText が「全角アルファベットのみ」の場合、
+    //     キーマップにしたがってひらがなに変換するロジックをここに入れる。
+    //
+    // ここではまずは「Surface = Raw」のままにしておきます。
+    //
+    const std::wstring& raw = _composingText.GetRawText();
+    std::wstring surface = raw;
+
+    LONG surfaceLen = (LONG)surface.size();
+    _composingText.SetSurface(surface, surfaceLen);
+
+    // ライブ変換はこのタイミングではリセット
+    _composingText.ClearLiveConversionText();
+
+    // 7. composition 全体を書き換える
+    if (pRangeComposition)
+    {
+        const std::wstring& text = _composingText.GetCurrentText();
+
+        // composition の範囲全体に SetText
+        if (pRangeComposition->SetText(ec, 0, text.c_str(), (ULONG)text.size()) == S_OK)
+        {
+            // キャレットを末尾に移動（元コードと同じ挙動）
+            tfSelection.range->Collapse(ec, TF_ANCHOR_END);
+            pContext->SetSelection(ec, 1, &tfSelection);
+        }
+
+        pRangeComposition->Release();
+    }
 
     //
-    // set the display attribute to the composition range.
+    // 8. 表示属性を composition 全体に設定（元コードと同じ）
     //
     _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
 
-Exit:
     tfSelection.range->Release();
     return S_OK;
 }
