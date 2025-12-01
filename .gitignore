@@ -1,0 +1,47 @@
+# ====================================
+# Visual Studio / C++ project template
+# ====================================
+
+# VS 関連のキャッシュ・一時ファイル
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+*.opendb
+*.ipch
+*.aps
+*.ncb
+*.log
+
+# ビルド成果物（Debug / Release / x64 など）
+Debug/
+Release/
+x64/
+x86/
+[Bb]uild/
+ipch/
+
+# コンパイル済みバイナリ・中間ファイル
+*.obj
+*.pdb
+*.pch
+*.idb
+*.ilk
+*.tlog
+*.log
+*.exe
+*.dll
+*.lib
+*.exp
+
+# VS が生成する一時ファイル
+*.cache
+*.lastbuildstate
+*.recipe
+
+# バックアップやアップグレードログ
+Backup/
+UpgradeLog*.htm
