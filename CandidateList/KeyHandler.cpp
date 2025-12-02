@@ -27,7 +27,7 @@
 class CKeyHandlerEditSession : public CEditSessionBase
 {
 public:
-    CKeyHandlerEditSession(CTextService* pTextService, ITfContext* pContext, WPARAM wParam) : CEditSessionBase(pTextService, pContext)
+    CKeyHandlerEditSession(CTextService *pTextService, ITfContext *pContext, WPARAM wParam) : CEditSessionBase(pTextService, pContext)
     {
         _wParam = wParam;
     }
@@ -50,21 +50,21 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
 
     switch (_wParam)
     {
-    case VK_LEFT:
-    case VK_RIGHT:
-        return _pTextService->_HandleArrowKey(ec, _pContext, _wParam);
+        case VK_LEFT:
+        case VK_RIGHT:
+            return _pTextService->_HandleArrowKey(ec, _pContext, _wParam);
 
-    case VK_RETURN:
-        return _pTextService->_HandleReturnKey(ec, _pContext);
+        case VK_RETURN:
+            return _pTextService->_HandleReturnKey(ec, _pContext);
 
-    case VK_SPACE:
-        return _pTextService->_HandleSpaceKey(ec, _pContext);
+        case VK_SPACE:
+            return _pTextService->_HandleSpaceKey(ec, _pContext);
 
-    default:
-        if ((_wParam >= 'A' && _wParam <= 'Z') ||
-            (_wParam >= '0' && _wParam <= '9'))
-            return _pTextService->_HandleCharacterKey(ec, _pContext, _wParam);
-        break;
+        default:
+            if ((_wParam >= 'A' && _wParam <= 'Z') ||
+                (_wParam >= '0' && _wParam <= '9'))
+                return _pTextService->_HandleCharacterKey(ec, _pContext, _wParam);
+            break;
     }
 
     return S_OK;
@@ -105,7 +105,7 @@ static WCHAR ToFullWidth(WCHAR ch)
 //
 //----------------------------------------------------------------------------
 
-BOOL IsRangeCovered(TfEditCookie ec, ITfRange* pRangeTest, ITfRange* pRangeCover)
+BOOL IsRangeCovered(TfEditCookie ec, ITfRange *pRangeTest, ITfRange *pRangeCover)
 {
     LONG lResult;
 
@@ -149,7 +149,7 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
     // 2. 入力されたキーを文字に変換（元コードと同じく VK → WCHAR）
     WCHAR ch = (WCHAR)wParam;
 
-    // ★ ここで半角 → 全角に変換（RawText は全角アルファベットとして保持）
+    // ★ ここで半角 → 全角に変換
     ch = ToFullWidth(ch);
 
     // 3. 現在の選択範囲（キャレット位置）を取得
@@ -189,13 +189,14 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
 
     // 6. RawText → SurfaceText へ変換
     //
-    //   - RawText には「全角アルファベット」が詰まっている
-    //   - _romajiConverter.ConvertFromRaw() の内部で
-    //       全角 → 半角 → ローマ字かな変換
-    //     を行い、ひらがな文字列を返す
+    // TODO:
+    //   - RawText が「全角アルファベットのみ」の場合、
+    //     キーマップにしたがってひらがなに変換するロジックをここに入れる。
+    //
+    // ここではまずは「Surface = Raw」のままにしておきます。
     //
     const std::wstring& raw = _composingText.GetRawText();
-    std::wstring surface = _romajiConverter.ConvertFromRaw(raw);
+    std::wstring surface = raw;
 
     LONG surfaceLen = (LONG)surface.size();
     _composingText.SetSurface(surface, surfaceLen);
@@ -234,7 +235,7 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
 //
 //----------------------------------------------------------------------------
 
-HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
+HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext *pContext)
 {
     // just terminate the composition
     _TerminateComposition(ec, pContext);
@@ -247,7 +248,7 @@ HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 //
 //----------------------------------------------------------------------------
 
-HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
+HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext *pContext)
 {
     //
     // set the display attribute to the composition range.
@@ -267,13 +268,13 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
     // 
     // we don't cache the document manager object. So get it from pContext.
     // 
-    ITfDocumentMgr* pDocumentMgr;
+    ITfDocumentMgr *pDocumentMgr;
     if (pContext->GetDocumentMgr(&pDocumentMgr) == S_OK)
     {
         // 
         // get the composition range.
         // 
-        ITfRange* pRange;
+        ITfRange *pRange;
         if (_pComposition->GetRange(&pRange) == S_OK)
         {
             _pCandidateList->_StartCandidateList(_tfClientId, pDocumentMgr, pContext, ec, pRange);
@@ -292,9 +293,9 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 //
 //----------------------------------------------------------------------------
 
-HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
+HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext *pContext, WPARAM wParam)
 {
-    ITfRange* pRangeComposition;
+    ITfRange *pRangeComposition;
     LONG cch;
     BOOL fEqual;
     TF_SELECTION tfSelection;
@@ -352,9 +353,9 @@ Exit:
 //
 //----------------------------------------------------------------------------
 
-HRESULT CTextService::_InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam)
+HRESULT CTextService::_InvokeKeyHandler(ITfContext *pContext, WPARAM wParam, LPARAM lParam)
 {
-    CKeyHandlerEditSession* pEditSession;
+    CKeyHandlerEditSession *pEditSession;
     HRESULT hr = E_FAIL;
 
     // we'll insert a char ourselves in place of this keystroke
@@ -371,3 +372,4 @@ HRESULT CTextService::_InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPA
 Exit:
     return hr;
 }
+

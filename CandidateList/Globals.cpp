@@ -5,14 +5,15 @@
 //  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 //  PARTICULAR PURPOSE.
 //
+//  Copyright (C) 2003  Microsoft Corporation.  All rights reserved.
+//
 //  Globals.cpp
 //
 //          Global variables
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "Globals.h"
-#include <msctf.h>  // TSF / GUID_LBI_INPUTMODE など
+#include "globals.h"
 
 HINSTANCE g_hInst;
 
@@ -20,63 +21,49 @@ LONG g_cRefDll = -1; // -1 /w no refs, for win95 InterlockedIncrement/Decrement 
 
 CRITICAL_SECTION g_cs;
 
-/*
- * 一部 SDK では GUID_LBI_INPUTMODE がヘッダに宣言されていない場合があるので、
- * 「宣言だけ」自前で追加する。
- *
- * ここでは「実体定義」は行わないことが重要。
- * 実体は uuid.lib(msctf_g.obj) 側にあるため、ここで定義すると LNK2005 になる。
- */
-#ifndef GUID_LBI_INPUTMODE
-EXTERN_C const GUID GUID_LBI_INPUTMODE;
-#endif
-
 /* e7ea138e-69f8-11d7-a6ea-00065b84435c */
 const CLSID c_clsidTextService = {
     0xe7ea138e,
     0x69f8,
     0x11d7,
     {0xa6, 0xea, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
-
+  };
 /* e7ea138f-69f8-11d7-a6ea-00065b84435c */
 const GUID c_guidProfile = {
     0xe7ea138f,
     0x69f8,
     0x11d7,
     {0xa6, 0xea, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
+  };
+/* 41f46e67-86d5-49fb-a1d9-3dc0941a66a3 */
+const GUID c_guidLangBarItemButton = {
+    0x41f46e67,
+    0x86d5,
+    0x49fb,
+    {0xa1, 0xd9, 0x3d, 0xc0, 0x94, 0x1a, 0x66, 0xa3}
+  };
 
-/*
- * IME モードアイコン用 GUID
- *
- * LanguageBar.cpp の CLangBarItemButton では
- *   _tfLangBarItemInfo.guidItem = c_guidLangBarItemButton;
- * としているので、ここで GUID_LBI_INPUTMODE をバインドしておくことで
- * 「入力インジケーターの IME モードアイコン」として扱われる。
- */
-const GUID c_guidLangBarItemButton = GUID_LBI_INPUTMODE;
 
 //
 //  define two guids for display attribute info. This textservice has
 //  two display attribute. One is for input text and the other is for the
 //  converted text.
 //
-//      c_guidDisplayAttributeInput
+//      c_guidDisplayAttributeInput 
 //      c_guidDisplayAttributeConverted
 //
 /* 4e1aa3fe-6c7f-11d7-a6ec-00065b84435c */
-const GUID c_guidDisplayAttributeInput = {
+const GUID c_guidDisplayAttributeInput = { 
     0x4e1aa3fe,
     0x6c7f,
     0x11d7,
     {0xa6, 0xec, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
-
+  };
 /* 4e1aa3ff-6c7f-11d7-a6ec-00065b84435c */
-const GUID c_guidDisplayAttributeConverted = {
+const GUID c_guidDisplayAttributeConverted = { 
     0x4e1aa3ff,
     0x6c7f,
     0x11d7,
     {0xa6, 0xec, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
+  };
+

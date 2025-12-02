@@ -1,4 +1,4 @@
-﻿//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -21,20 +21,21 @@
 // GUID for the preserved keys.
 //
 /* 6a0bde41-6adf-11d7-a6ea-00065b84435c */
-static const GUID GUID_PRESERVEDKEY_ONOFF = {
+static const GUID GUID_PRESERVEDKEY_ONOFF = { 
     0x6a0bde41,
     0x6adf,
     0x11d7,
     {0xa6, 0xea, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
+  };
 
 /* 6a0bde42-6adf-11d7-a6ea-00065b84435c */
-static const GUID GUID_PRESERVEDKEY_F6 = {
+static const GUID GUID_PRESERVEDKEY_F6 = { 
     0x6a0bde42,
     0x6adf,
     0x11d7,
     {0xa6, 0xea, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
-};
+  };
+
 
 //
 // the preserved keys declaration
@@ -44,13 +45,13 @@ static const GUID GUID_PRESERVEDKEY_F6 = {
 //
 static const TF_PRESERVEDKEY c_pkeyOnOff0 = { 0xC0, TF_MOD_ALT };
 static const TF_PRESERVEDKEY c_pkeyOnOff1 = { VK_KANJI, TF_MOD_IGNORE_ALL_MODIFIER };
-static const TF_PRESERVEDKEY c_pkeyF6 = { VK_F6, TF_MOD_ON_KEYUP };
+static const TF_PRESERVEDKEY c_pkeyF6 =   { VK_F6, TF_MOD_ON_KEYUP };
 
 //
 // the description for the preserved keys
 //
 static const WCHAR c_szPKeyOnOff[] = L"OnOff";
-static const WCHAR c_szPKeyF6[] = L"Function 6";
+static const WCHAR c_szPKeyF6[]    = L"Function 6";
 
 //+---------------------------------------------------------------------------
 //
@@ -58,19 +59,20 @@ static const WCHAR c_szPKeyF6[] = L"Function 6";
 //
 //----------------------------------------------------------------------------
 
-BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
+BOOL CTextService::_IsKeyEaten(ITfContext *pContext, WPARAM wParam)
 {
-    // 1. キーボードが無効なら何も食べない
+    // if the keyboard is disabled, we don't eat keys.
     if (_IsKeyboardDisabled())
         return FALSE;
 
-    // 2. IME OFF なら食べない
+    // if the keyboard is closed, we don't eat keys.
     if (!_IsKeyboardOpen())
         return FALSE;
 
     //
-    // 3. 候補ウィンドウ表示中は、キー処理を CandidateList 側に任せる
-    //    （元サンプルと同じ挙動）
+    // The text service key handler does not do anything while the candidate
+    // window is shown.
+    // The candidate list handles the keys through ITfContextKeyEventSink.
     //
     if (_pCandidateList &&
         _pCandidateList->_IsContextCandidateWindow(pContext))
@@ -78,53 +80,27 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
         return FALSE;
     }
 
-    //
-    // 4. 入力モード共通で扱いたいキー
-    //    - F12: IME 内部の「あ／ENG」モード切替用
-    //      → KeyHandler（CKeyHandlerEditSession）に処理させるため IME が食う
-    //
-    if (wParam == VK_F12)
-    {
-        return TRUE;
-    }
-
-    //
-    // 5. ENG モード (半角英数モード) のとき:
-    //    - 通常のキー入力はアプリケーションにそのまま流す
-    //    - つまりローマ字かな変換は走らない
-    //
-    if (_inputMode == INPUTMODE_ALPHANUMERIC)
-    {
-        // 上で F12 だけは TRUE で返しているので、ここでは全て FALSE
-        return FALSE;
-    }
-
-    //
-    // 6. ここからは「ひらがなモード」のキー判定
-    //    - 元のサンプルのロジックをベースに、ローマ字入力用として A〜Z, 0〜9 を食う
-    //
+    // eat only keys that CKeyHandlerEditSession can hadles.
     switch (wParam)
     {
-    case VK_LEFT:
-    case VK_RIGHT:
-    case VK_RETURN:
-    case VK_SPACE:
-        // composition 中だけ IME 側で処理
-        if (_IsComposing())
-            return TRUE;
-        return FALSE;
+        case VK_LEFT:
+        case VK_RIGHT:
+        case VK_RETURN:
+        case VK_SPACE:
+            if (_IsComposing())
+                return TRUE;
+            return FALSE;
     }
 
-    // A〜Z はローマ字かな入力として IME が食う
     if (wParam >= 'A' && wParam <= 'Z')
         return TRUE;
 
-    // 0〜9 もローマ字テーブル側で使うので IME が食う
     if (wParam >= '0' && wParam <= '9')
         return TRUE;
 
     return FALSE;
 }
+
 
 //+---------------------------------------------------------------------------
 //
@@ -135,7 +111,6 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
 
 STDAPI CTextService::OnSetFocus(BOOL fForeground)
 {
-    UNREFERENCED_PARAMETER(fForeground);
     return S_OK;
 }
 
@@ -146,13 +121,8 @@ STDAPI CTextService::OnSetFocus(BOOL fForeground)
 // Called by the system to query this service wants a potential keystroke.
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten)
+STDAPI CTextService::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
 {
-    UNREFERENCED_PARAMETER(lParam);
-
-    if (pfEaten == NULL)
-        return E_INVALIDARG;
-
     *pfEaten = _IsKeyEaten(pContext, wParam);
     return S_OK;
 }
@@ -165,18 +135,14 @@ STDAPI CTextService::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM l
 // on exit, the application will not handle the keystroke.
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::OnKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten)
+STDAPI CTextService::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
 {
-    UNREFERENCED_PARAMETER(lParam);
-
-    if (pfEaten == NULL)
-        return E_INVALIDARG;
-
     *pfEaten = _IsKeyEaten(pContext, wParam);
 
     if (*pfEaten)
     {
-        // IME 側で処理するキーは EditSession で処理
+        // If the composition object was created successfully, we can invoke
+        // the key handler.
         _InvokeKeyHandler(pContext, wParam, lParam);
     }
     return S_OK;
@@ -189,17 +155,9 @@ STDAPI CTextService::OnKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lPara
 // Called by the system to query this service wants a potential keystroke.
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::OnTestKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten)
+STDAPI CTextService::OnTestKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
 {
-    UNREFERENCED_PARAMETER(pContext);
-    UNREFERENCED_PARAMETER(wParam);
-    UNREFERENCED_PARAMETER(lParam);
-
-    if (pfEaten == NULL)
-        return E_INVALIDARG;
-
-    // KeyUp は特に処理しないので常に FALSE
-    *pfEaten = FALSE;
+    *pfEaten = _IsKeyEaten(pContext, wParam);
     return S_OK;
 }
 
@@ -211,16 +169,9 @@ STDAPI CTextService::OnTestKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lPa
 // on exit, the application will not handle the keystroke.
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::OnKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten)
+STDAPI CTextService::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
 {
-    UNREFERENCED_PARAMETER(pContext);
-    UNREFERENCED_PARAMETER(wParam);
-    UNREFERENCED_PARAMETER(lParam);
-
-    if (pfEaten == NULL)
-        return E_INVALIDARG;
-
-    *pfEaten = FALSE;
+    *pfEaten = _IsKeyEaten(pContext, wParam);
     return S_OK;
 }
 
@@ -231,10 +182,8 @@ STDAPI CTextService::OnKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lParam,
 // Called when a hotkey (registered by us, or by the system) is typed.
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* pfEaten)
+STDAPI CTextService::OnPreservedKey(ITfContext *pContext, REFGUID rguid, BOOL *pfEaten)
 {
-    if (pfEaten == NULL)
-        return E_INVALIDARG;
 
     if (IsEqualGUID(rguid, GUID_PRESERVEDKEY_ONOFF))
     {
@@ -244,11 +193,9 @@ STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* p
     }
     else
     {
-        // GUID_PRESERVEDKEY_F6 は今のところ何もしない（サンプルのまま）
         *pfEaten = FALSE;
     }
 
-    UNREFERENCED_PARAMETER(pContext);
     return S_OK;
 }
 
@@ -261,13 +208,13 @@ STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* p
 
 BOOL CTextService::_InitKeyEventSink()
 {
-    ITfKeystrokeMgr* pKeystrokeMgr;
+    ITfKeystrokeMgr *pKeystrokeMgr;
     HRESULT hr;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void **)&pKeystrokeMgr) != S_OK)
         return FALSE;
 
-    hr = pKeystrokeMgr->AdviseKeyEventSink(_tfClientId, (ITfKeyEventSink*)this, TRUE);
+    hr = pKeystrokeMgr->AdviseKeyEventSink(_tfClientId, (ITfKeyEventSink *)this, TRUE);
 
     pKeystrokeMgr->Release();
 
@@ -283,9 +230,9 @@ BOOL CTextService::_InitKeyEventSink()
 
 void CTextService::_UninitKeyEventSink()
 {
-    ITfKeystrokeMgr* pKeystrokeMgr;
+    ITfKeystrokeMgr *pKeystrokeMgr;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void **)&pKeystrokeMgr) != S_OK)
         return;
 
     pKeystrokeMgr->UnadviseKeyEventSink(_tfClientId);
@@ -302,32 +249,32 @@ void CTextService::_UninitKeyEventSink()
 
 BOOL CTextService::_InitPreservedKey()
 {
-    ITfKeystrokeMgr* pKeystrokeMgr;
+    ITfKeystrokeMgr *pKeystrokeMgr;
     HRESULT hr;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void **)&pKeystrokeMgr) != S_OK)
         return FALSE;
 
     // register Alt+~ key
-    hr = pKeystrokeMgr->PreserveKey(_tfClientId,
-        GUID_PRESERVEDKEY_ONOFF,
-        &c_pkeyOnOff0,
-        c_szPKeyOnOff,
-        lstrlen(c_szPKeyOnOff));
+    hr = pKeystrokeMgr->PreserveKey(_tfClientId, 
+                                    GUID_PRESERVEDKEY_ONOFF,
+                                    &c_pkeyOnOff0,
+                                    c_szPKeyOnOff,
+                                    lstrlen(c_szPKeyOnOff));
 
     // register KANJI key
-    hr = pKeystrokeMgr->PreserveKey(_tfClientId,
-        GUID_PRESERVEDKEY_ONOFF,
-        &c_pkeyOnOff1,
-        c_szPKeyOnOff,
-        lstrlen(c_szPKeyOnOff));
+    hr = pKeystrokeMgr->PreserveKey(_tfClientId, 
+                                    GUID_PRESERVEDKEY_ONOFF,
+                                    &c_pkeyOnOff1,
+                                    c_szPKeyOnOff,
+                                    lstrlen(c_szPKeyOnOff));
 
-    // register F6 key (サンプルのまま登録しておく。必要なら後で利用可能)
-    hr = pKeystrokeMgr->PreserveKey(_tfClientId,
-        GUID_PRESERVEDKEY_F6,
-        &c_pkeyF6,
-        c_szPKeyF6,
-        lstrlen(c_szPKeyF6));
+    // register F6 key
+    hr = pKeystrokeMgr->PreserveKey(_tfClientId, 
+                                    GUID_PRESERVEDKEY_F6,
+                                    &c_pkeyF6,
+                                    c_szPKeyF6,
+                                    lstrlen(c_szPKeyF6));
 
     pKeystrokeMgr->Release();
 
@@ -343,14 +290,15 @@ BOOL CTextService::_InitPreservedKey()
 
 void CTextService::_UninitPreservedKey()
 {
-    ITfKeystrokeMgr* pKeystrokeMgr;
+    ITfKeystrokeMgr *pKeystrokeMgr;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void **)&pKeystrokeMgr) != S_OK)
         return;
 
     pKeystrokeMgr->UnpreserveKey(GUID_PRESERVEDKEY_ONOFF, &c_pkeyOnOff0);
     pKeystrokeMgr->UnpreserveKey(GUID_PRESERVEDKEY_ONOFF, &c_pkeyOnOff1);
-    pKeystrokeMgr->UnpreserveKey(GUID_PRESERVEDKEY_F6, &c_pkeyF6);
+    pKeystrokeMgr->UnpreserveKey(GUID_PRESERVEDKEY_F6,    &c_pkeyF6);
 
     pKeystrokeMgr->Release();
 }
+

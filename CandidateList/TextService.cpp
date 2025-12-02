@@ -24,9 +24,9 @@
 //----------------------------------------------------------------------------
 
 /* static */
-HRESULT CTextService::CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObj)
+HRESULT CTextService::CreateInstance(IUnknown *pUnkOuter, REFIID riid, void **ppvObj)
 {
-    CTextService* pCase;
+    CTextService *pCase;
     HRESULT hr;
 
     if (ppvObj == NULL)
@@ -74,11 +74,6 @@ CTextService::CTextService()
     _dwTextEditSinkCookie = TF_INVALID_COOKIE;
 
     //
-    // Initialize the LanguageBar item pointer.
-    //
-    _pLangBarItem = NULL;
-
-    //
     // Initialize the composition object pointer.
     //
     _pComposition = NULL;
@@ -87,24 +82,6 @@ CTextService::CTextService()
     // Initialize the candidate list object pointer.
     //
     _pCandidateList = NULL;
-
-    //
-    // Initialize display attribute guid atoms.
-    //
-    _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
-    _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
-
-    //
-    // Initialize composing text / romaji converter.
-    //
-    // （特に何もする必要がなければデフォルトコンストラクタに任せる）
-
-    //
-    // 入力モードを既定値（ひらがな）に初期化
-    //
-    _inputMode = INPUTMODE_HIRAGANA;
-
-    _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
 }
@@ -126,7 +103,7 @@ CTextService::~CTextService()
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
+STDAPI CTextService::QueryInterface(REFIID riid, void **ppvObj)
 {
     if (ppvObj == NULL)
         return E_INVALIDARG;
@@ -134,30 +111,29 @@ STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
     *ppvObj = NULL;
 
     if (IsEqualIID(riid, IID_IUnknown) ||
-        IsEqualIID(riid, IID_ITfTextInputProcessor) ||
-        IsEqualIID(riid, IID_ITfTextInputProcessorEx))
+        IsEqualIID(riid, IID_ITfTextInputProcessor))
     {
-        *ppvObj = (ITfTextInputProcessorEx*)this;
+        *ppvObj = (ITfTextInputProcessor *)this;
     }
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
     {
-        *ppvObj = (ITfThreadMgrEventSink*)this;
+        *ppvObj = (ITfThreadMgrEventSink *)this;
     }
     else if (IsEqualIID(riid, IID_ITfTextEditSink))
     {
-        *ppvObj = (ITfTextEditSink*)this;
+        *ppvObj = (ITfTextEditSink *)this;
     }
     else if (IsEqualIID(riid, IID_ITfKeyEventSink))
     {
-        *ppvObj = (ITfKeyEventSink*)this;
+        *ppvObj = (ITfKeyEventSink *)this;
     }
     else if (IsEqualIID(riid, IID_ITfCompositionSink))
     {
-        *ppvObj = (ITfCompositionSink*)this;
+        *ppvObj = (ITfKeyEventSink *)this;
     }
     else if (IsEqualIID(riid, IID_ITfDisplayAttributeProvider))
     {
-        *ppvObj = (ITfDisplayAttributeProvider*)this;
+        *ppvObj = (ITfDisplayAttributeProvider *)this;
     }
 
     if (*ppvObj)
@@ -168,6 +144,7 @@ STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
 
     return E_NOINTERFACE;
 }
+
 
 //+---------------------------------------------------------------------------
 //
@@ -206,21 +183,19 @@ STDAPI_(ULONG) CTextService::Release()
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::Activate(ITfThreadMgr* pThreadMgr, TfClientId tfClientId)
+STDAPI CTextService::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
 {
     return ActivateEx(pThreadMgr, tfClientId, 0);
 }
 
 //+---------------------------------------------------------------------------
 //
-// ActivateEx
+// Activate
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId, DWORD dwFlags)
+STDAPI CTextService::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId, DWORD dwFlags)
 {
-    UNREFERENCED_PARAMETER(dwFlags);
-
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
@@ -231,11 +206,11 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     if (!_InitThreadMgrEventSink())
         goto ExitError;
 
-    //
+    // 
     //  If there is the focus document manager already,
     //  we advise the TextEditSink.
-    //
-    ITfDocumentMgr* pDocMgrFocus;
+    // 
+    ITfDocumentMgr *pDocMgrFocus;
     if ((_pThreadMgr->GetFocus(&pDocMgrFocus) == S_OK) &&
         (pDocMgrFocus != NULL))
     {
@@ -324,26 +299,4 @@ STDAPI CTextService::Deactivate()
     _tfClientId = TF_CLIENTID_NULL;
 
     return S_OK;
-}
-
-//+---------------------------------------------------------------------------
-//
-// SetInputMode
-//
-//----------------------------------------------------------------------------
-
-void CTextService::SetInputMode(InputMode mode)
-{
-    if (_inputMode == mode)
-    {
-        return;
-    }
-
-    _inputMode = mode;
-
-    //
-    // ここで必要であれば、コンポジション再描画や
-    // 読みのロジックをリセットする処理などを入れてもよい。
-    // 現時点ではモードフラグの更新のみ。
-    //
 }

@@ -170,7 +170,6 @@
     <ClCompile Include="LanguageBar.cpp" />
     <ClCompile Include="PreComp.cpp" />
     <ClCompile Include="Register.cpp" />
-    <ClCompile Include="RomajiKanaConverter.cpp" />
     <ClCompile Include="Server.cpp" />
     <ClCompile Include="StartComposition.cpp" />
     <ClCompile Include="TextEditSink.cpp" />
@@ -187,7 +186,6 @@
     <ClInclude Include="Globals.h" />
     <ClInclude Include="msctf.h" />
     <ClInclude Include="Resource.h" />
-    <ClInclude Include="RomajiKanaConverter.h" />
     <ClInclude Include="TextService.h" />
   </ItemGroup>
   <ItemGroup>

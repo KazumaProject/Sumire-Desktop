@@ -15,66 +15,75 @@
 
 #ifndef TEXTSERVICE_H
 #define TEXTSERVICE_H
+
 #include "ComposingText.h"
+#include "RomajiKanaConverter.h"
 
 class CLangBarItemButton;
 class CCandidateList;
 
+// 入力モードの定義（あ / ENG 用）
+enum InputMode
+{
+    INPUTMODE_HIRAGANA = 0,      // ローマ字→ひらがな
+    INPUTMODE_ALPHANUMERIC = 1   // そのまま英数字（ENG）
+};
+
 class CTextService : public ITfTextInputProcessorEx,
-                     public ITfThreadMgrEventSink,
-                     public ITfTextEditSink,
-                     public ITfKeyEventSink,
-                     public ITfCompositionSink,
-                     public ITfDisplayAttributeProvider
+    public ITfThreadMgrEventSink,
+    public ITfTextEditSink,
+    public ITfKeyEventSink,
+    public ITfCompositionSink,
+    public ITfDisplayAttributeProvider
 {
 public:
     CTextService();
     ~CTextService();
 
     // IUnknown
-    STDMETHODIMP QueryInterface(REFIID riid, void **ppvObj);
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppvObj);
     STDMETHODIMP_(ULONG) AddRef(void);
     STDMETHODIMP_(ULONG) Release(void);
 
     // ITfTextInputProcessor
-    STDMETHODIMP Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId);
+    STDMETHODIMP Activate(ITfThreadMgr* pThreadMgr, TfClientId tfClientId);
     STDMETHODIMP Deactivate();
 
     // ITfTextInputProcessorEx
-    STDMETHODIMP ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId, DWORD dwFlags);
+    STDMETHODIMP ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId, DWORD dwFlags);
 
     // ITfThreadMgrEventSink
-    STDMETHODIMP OnInitDocumentMgr(ITfDocumentMgr *pDocMgr);
-    STDMETHODIMP OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr);
-    STDMETHODIMP OnSetFocus(ITfDocumentMgr *pDocMgrFocus, ITfDocumentMgr *pDocMgrPrevFocus);
-    STDMETHODIMP OnPushContext(ITfContext *pContext);
-    STDMETHODIMP OnPopContext(ITfContext *pContext);
+    STDMETHODIMP OnInitDocumentMgr(ITfDocumentMgr* pDocMgr);
+    STDMETHODIMP OnUninitDocumentMgr(ITfDocumentMgr* pDocMgr);
+    STDMETHODIMP OnSetFocus(ITfDocumentMgr* pDocMgrFocus, ITfDocumentMgr* pDocMgrPrevFocus);
+    STDMETHODIMP OnPushContext(ITfContext* pContext);
+    STDMETHODIMP OnPopContext(ITfContext* pContext);
 
     // ITfTextEditSink
-    STDMETHODIMP OnEndEdit(ITfContext *pContext, TfEditCookie ecReadOnly, ITfEditRecord *pEditRecord);
+    STDMETHODIMP OnEndEdit(ITfContext* pContext, TfEditCookie ecReadOnly, ITfEditRecord* pEditRecord);
 
     // ITfKeyEventSink
     STDMETHODIMP OnSetFocus(BOOL fForeground);
-    STDMETHODIMP OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten);
-    STDMETHODIMP OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten);
-    STDMETHODIMP OnTestKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten);
-    STDMETHODIMP OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pfEaten);
-    STDMETHODIMP OnPreservedKey(ITfContext *pContext, REFGUID rguid, BOOL *pfEaten);
+    STDMETHODIMP OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+    STDMETHODIMP OnKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+    STDMETHODIMP OnTestKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+    STDMETHODIMP OnKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+    STDMETHODIMP OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* pfEaten);
 
     // ITfCompositionSink
-    STDMETHODIMP OnCompositionTerminated(TfEditCookie ecWrite, ITfComposition *pComposition);
+    STDMETHODIMP OnCompositionTerminated(TfEditCookie ecWrite, ITfComposition* pComposition);
 
     // ITfDisplayAttributeProvider
-    STDMETHODIMP EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo **ppEnum);
-    STDMETHODIMP GetDisplayAttributeInfo(REFGUID guidInfo, ITfDisplayAttributeInfo **ppInfo);
+    STDMETHODIMP EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** ppEnum);
+    STDMETHODIMP GetDisplayAttributeInfo(REFGUID guidInfo, ITfDisplayAttributeInfo** ppInfo);
 
     // CClassFactory factory callback
-    static HRESULT CreateInstance(IUnknown *pUnkOuter, REFIID riid, void **ppvObj);
+    static HRESULT CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObj);
 
-    ITfThreadMgr *_GetThreadMgr() { return _pThreadMgr; }
+    ITfThreadMgr* _GetThreadMgr() { return _pThreadMgr; }
     TfClientId _GetClientId() { return _tfClientId; }
-    ITfComposition *_GetComposition() { return _pComposition; }
-    CCandidateList *_GetCandidateList() {return _pCandidateList;}
+    ITfComposition* _GetComposition() { return _pComposition; }
+    CCandidateList* _GetCandidateList() { return _pCandidateList; }
 
     // utility function for compartment
     BOOL _IsKeyboardDisabled();
@@ -82,22 +91,41 @@ public:
     HRESULT _SetKeyboardOpen(BOOL fOpen);
 
     // functions for the composition object.
-    void _StartComposition(ITfContext *pContext);
-    void _EndComposition(ITfContext *pContext);
-    void _TerminateComposition(TfEditCookie ec, ITfContext *pContext);
+    void _StartComposition(ITfContext* pContext);
+    void _EndComposition(ITfContext* pContext);
+    void _TerminateComposition(TfEditCookie ec, ITfContext* pContext);
     BOOL _IsComposing();
-    void _SetComposition(ITfComposition *pComposition);
+    void _SetComposition(ITfComposition* pComposition);
 
     // key event handlers.
-    HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext *pContext, WPARAM wParam);
-    HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext *pContext, WPARAM wParam);
-    HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext *pContext);
-    HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext *pContext);
-    HRESULT _InvokeKeyHandler(ITfContext *pContext, WPARAM wParam, LPARAM lParam);
+    HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
+    HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
+    HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
 
-    void _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext *pContext);
-    BOOL _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext *pContext, TfGuidAtom gaDisplayAttribute);
+    void _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
+    BOOL _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext, TfGuidAtom gaDisplayAttribute);
     BOOL _InitDisplayAttributeGuidAtom();
+
+    // 入力モードの操作
+    void SetInputMode(InputMode mode);
+    void ToggleInputMode()
+    {
+        if (_inputMode == INPUTMODE_HIRAGANA)
+        {
+            SetInputMode(INPUTMODE_ALPHANUMERIC);
+        }
+        else
+        {
+            SetInputMode(INPUTMODE_HIRAGANA);
+        }
+    }
+
+    InputMode GetInputMode() const
+    {
+        return _inputMode;
+    }
 
 private:
     // initialize and uninitialize ThreadMgrEventSink.
@@ -105,7 +133,7 @@ private:
     void _UninitThreadMgrEventSink();
 
     // initialize TextEditSink.
-    BOOL _InitTextEditSink(ITfDocumentMgr *pDocMgr);
+    BOOL _InitTextEditSink(ITfDocumentMgr* pDocMgr);
 
     // initialize and uninitialize LanguageBar Item.
     BOOL _InitLanguageBar();
@@ -120,12 +148,12 @@ private:
     void _UninitPreservedKey();
 
     // utility function for KeyEventSink
-    BOOL _IsKeyEaten(ITfContext *pContext, WPARAM wParam);
+    BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam);
 
     //
     // state
     //
-    ITfThreadMgr *_pThreadMgr;
+    ITfThreadMgr* _pThreadMgr;
     TfClientId _tfClientId;
 
     // The cookie of ThreadMgrEventSink
@@ -134,25 +162,28 @@ private:
     //
     // private variables for TextEditSink
     //
-    ITfContext   *_pTextEditSinkContext;
+    ITfContext* _pTextEditSinkContext;
     DWORD _dwTextEditSinkCookie;
 
-    CLangBarItemButton *_pLangBarItem;
+    CLangBarItemButton* _pLangBarItem;
 
     // the current composition object.
-    ITfComposition *_pComposition;
+    ITfComposition* _pComposition;
 
     // guidatom for the display attibute.
     TfGuidAtom _gaDisplayAttributeInput;
     TfGuidAtom _gaDisplayAttributeConverted;
 
     // the candidate list object.
-    CCandidateList *_pCandidateList;
+    CCandidateList* _pCandidateList;
 
-    ComposingText _composingText;
+    ComposingText       _composingText;
+    RomajiKanaConverter _romajiConverter;
+
+    // 現在の入力モード（あ / ENG）
+    InputMode _inputMode;
 
     LONG _cRef;     // COM ref count
 };
-
 
 #endif // TEXTSERVICE_H

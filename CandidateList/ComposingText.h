@@ -1,9 +1,7 @@
-// ComposingText.h
 #pragma once
 
 #include <Windows.h> 
 #include <string>
-#include "RomajiKanaConverter.h"
 
 class ComposingText
 {
@@ -80,32 +78,6 @@ public:
         _surfaceCursor = cursor;
     }
 
-    // ★ここが追加★
-    // RawText（全角ローマ字）から SurfaceText（かな）を生成し、
-    // Surface 側のカーソル位置も Raw のカーソル位置に合わせておおよそ計算する。
-    void UpdateSurfaceFromRaw(const RomajiKanaConverter& converter)
-    {
-        // 1. Raw 全体をかなに変換
-        _surfaceText = converter.ConvertFromRaw(_rawText);
-
-        // 2. Raw 上のカーソル位置に対応する Surface のカーソル位置を計算
-        if (_rawCursor <= 0)
-        {
-            _surfaceCursor = 0;
-        }
-        else if (_rawCursor >= (LONG)_rawText.size())
-        {
-            _surfaceCursor = static_cast<LONG>(_surfaceText.size());
-        }
-        else
-        {
-            // 先頭から Raw のカーソル位置までを変換した結果の長さを Surface のカーソルとみなす
-            std::wstring rawPrefix = _rawText.substr(0, _rawCursor);
-            std::wstring surfacePrefix = converter.ConvertFromRaw(rawPrefix);
-            _surfaceCursor = static_cast<LONG>(surfacePrefix.size());
-        }
-    }
-
     // --- LiveConversionText ---
 
     void EnableLiveConversion(BOOL enable)
@@ -144,7 +116,7 @@ public:
     }
 
 private:
-    std::wstring _rawText;             // RawText: アルファベット（全角含む）
+    std::wstring _rawText;             // RawText: アルファベット
     std::wstring _surfaceText;         // SurfaceText: ひらがな or そのまま
     std::wstring _liveConversionText;  // LiveConversionText: ライブ変換の第1候補
 
