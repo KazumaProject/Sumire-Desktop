@@ -185,6 +185,7 @@
     <ClInclude Include="EditSession.h" />
     <ClInclude Include="EnumDisplayAttributeInfo.h" />
     <ClInclude Include="Globals.h" />
+    <ClInclude Include="LanguageBar.h" />
     <ClInclude Include="msctf.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="RomajiKanaConverter.h" />

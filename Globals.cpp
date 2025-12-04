@@ -1,31 +1,18 @@
 //////////////////////////////////////////////////////////////////////
 //
-//  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-//  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
-//  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-//  PARTICULAR PURPOSE.
-//
 //  Globals.cpp
-//
-//          Global variables
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Globals.h"
-#include <msctf.h>  // TSF / GUID_LBI_INPUTMODE など
 
 HINSTANCE g_hInst;
-
-LONG g_cRefDll = -1; // -1 /w no refs, for win95 InterlockedIncrement/Decrement compat
-
+LONG g_cRefDll = -1;
 CRITICAL_SECTION g_cs;
 
 /*
  * 一部 SDK では GUID_LBI_INPUTMODE がヘッダに宣言されていない場合があるので、
- * 「宣言だけ」自前で追加する。
- *
- * ここでは「実体定義」は行わないことが重要。
- * 実体は uuid.lib(msctf_g.obj) 側にあるため、ここで定義すると LNK2005 になる。
+ * 「宣言だけ」自前で追加する（今回は実際には使わない）。
  */
 #ifndef GUID_LBI_INPUTMODE
 EXTERN_C const GUID GUID_LBI_INPUTMODE;
@@ -48,24 +35,35 @@ const GUID c_guidProfile = {
 };
 
 /*
- * IME モードアイコン用 GUID
+ * LangBar ボタン用 GUID
  *
- * LanguageBar.cpp の CLangBarItemButton では
- *   _tfLangBarItemInfo.guidItem = c_guidLangBarItemButton;
- * としているので、ここで GUID_LBI_INPUTMODE をバインドしておくことで
- * 「入力インジケーターの IME モードアイコン」として扱われる。
+ *  - c_guidLangBarItemButton
+ *      Sumire の「ブランドアイコン」用 GUID
+ *
+ *  - c_guidLangBarItemButtonMode
+ *      Sumire の「モードアイコン」用 GUID
+ *      （GUID_LBI_INPUTMODE は使わず、完全に独立させる）
  */
-const GUID c_guidLangBarItemButton = GUID_LBI_INPUTMODE;
+
+ // ブランドアイコン用 GUID
+const GUID c_guidLangBarItemButton = {
+    0x0f7b7c10,
+    0x9f8a,
+    0x4e65,
+    {0x9a, 0x3f, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc}
+};
+
+// モードアイコン用 GUID（独自 GUID）
+const GUID c_guidLangBarItemButtonMode = {
+    0x3a9c77e1,
+    0x52ba,
+    0x4b57,
+    {0x81, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+};
 
 //
-//  define two guids for display attribute info. This textservice has
-//  two display attribute. One is for input text and the other is for the
-//  converted text.
+// Display Attribute GUID（元のまま）
 //
-//      c_guidDisplayAttributeInput
-//      c_guidDisplayAttributeConverted
-//
-/* 4e1aa3fe-6c7f-11d7-a6ec-00065b84435c */
 const GUID c_guidDisplayAttributeInput = {
     0x4e1aa3fe,
     0x6c7f,
@@ -73,7 +71,6 @@ const GUID c_guidDisplayAttributeInput = {
     {0xa6, 0xec, 0x00, 0x06, 0x5b, 0x84, 0x43, 0x5c}
 };
 
-/* 4e1aa3ff-6c7f-11d7-a6ec-00065b84435c */
 const GUID c_guidDisplayAttributeConverted = {
     0x4e1aa3ff,
     0x6c7f,

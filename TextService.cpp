@@ -5,15 +5,13 @@
 //  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 //  PARTICULAR PURPOSE.
 //
-//  Copyright (C) 2003  Microsoft Corporation.  All rights reserved.
-//
 //  TextService.cpp
 //
 //          IUnknown, ITfTextInputProcessor implementation.
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "globals.h"
+#include "Globals.h"
 #include "TextService.h"
 #include "CandidateList.h"
 
@@ -74,9 +72,10 @@ CTextService::CTextService()
     _dwTextEditSinkCookie = TF_INVALID_COOKIE;
 
     //
-    // Initialize the LanguageBar item pointer.
+    // Initialize the LanguageBar item pointers.
     //
-    _pLangBarItem = NULL;
+    _pLangBarItemBrand = NULL;
+    _pLangBarItemMode = NULL;
 
     //
     // Initialize the composition object pointer.
@@ -118,6 +117,26 @@ CTextService::CTextService()
 CTextService::~CTextService()
 {
     DllRelease();
+
+    _pThreadMgr = NULL;
+    _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _pTextEditSinkContext = NULL;
+    _dwTextEditSinkCookie = TF_INVALID_COOKIE;
+
+    // LangBar item ポインタ初期化
+    _pLangBarItemBrand = NULL;
+    _pLangBarItemMode = NULL;
+
+    _pComposition = NULL;
+    _pCandidateList = NULL;
+
+    _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
+    _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
+
+    _inputMode = INPUTMODE_HIRAGANA;
+    _tfClientId = TF_CLIENTID_NULL;
+
+    _cRef = 1;
 }
 
 //+---------------------------------------------------------------------------
@@ -342,8 +361,58 @@ void CTextService::SetInputMode(InputMode mode)
     _inputMode = mode;
 
     //
-    // ここで必要であれば、コンポジション再描画や
-    // 読みのロジックをリセットする処理などを入れてもよい。
+    // 必要に応じてここでコンポジション再描画や
+    // 読みロジックのリセットを行うこともできる。
     // 現時点ではモードフラグの更新のみ。
     //
+}
+
+//+---------------------------------------------------------------------------
+//
+// CTextService::_SetCompartment
+//
+//   GUID_COMPARTMENT_* に値を書き込むヘルパー。
+//   LanguageBar から「ひらがな / 英数」「キーボード ON/OFF」の状態を
+//   OS 側に通知するために使う。
+//
+//----------------------------------------------------------------------------
+
+HRESULT CTextService::_SetCompartment(REFGUID rguid, const VARIANT* pvar)
+{
+    if (_pThreadMgr == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfCompartmentMgr* pCompMgr = NULL;
+    ITfCompartment* pComp = NULL;
+
+    HRESULT hr = _pThreadMgr->QueryInterface(
+        IID_ITfCompartmentMgr,
+        (void**)&pCompMgr);
+    if (FAILED(hr) || !pCompMgr)
+    {
+        goto Exit;
+    }
+
+    hr = pCompMgr->GetCompartment(rguid, &pComp);
+    if (FAILED(hr) || !pComp)
+    {
+        goto Exit;
+    }
+
+    // _tfClientId は Activate / ActivateEx で保存したクライアント ID
+    hr = pComp->SetValue(_tfClientId, pvar);
+
+Exit:
+    if (pComp)
+    {
+        pComp->Release();
+    }
+    if (pCompMgr)
+    {
+        pCompMgr->Release();
+    }
+
+    return hr;
 }

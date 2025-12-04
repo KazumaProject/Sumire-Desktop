@@ -21,13 +21,6 @@
 #define IDS_DISPLAY_NAME           2
 #define IDS_TRUE                   3
 #define IDS_FALSE                  4
-#define IDS_LANGBAR_ITEM_DESC      5
-
-//
-// LangBar の説明テキスト用マクロ
-// LanguageBar.cpp / TextService.cpp で使っている LANGBAR_ITEM_DESC
-//
-#define LANGBAR_ITEM_DESC L"Sumire Text Service"   // 好きな説明文に変えてOK
 
 //
 // Icon resources

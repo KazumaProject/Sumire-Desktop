@@ -1,148 +1,96 @@
 //////////////////////////////////////////////////////////////////////
 //
-//  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-//  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
-//  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-//  PARTICULAR PURPOSE.
-//
-//  Copyright (C) 2003  Microsoft Corporation.  All rights reserved.
-//
 //  LanguageBar.cpp
-//
-//          Language Bar UI code.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Globals.h"
 #include "TextService.h"
 #include "Resource.h"
+#include "LanguageBar.h"
 
-//
-// The cookie for the sink to CLangBarItemButton.
-//
 #define TEXTSERVICE_LANGBARITEMSINK_COOKIE 0x0fab0fab
 
-//
-// The ids of the menu item of the language bar button.
-//
-#define MENUITEM_INDEX_0        0   // ひらがな
-#define MENUITEM_INDEX_1        1   // 英数
-#define MENUITEM_INDEX_OPENCLOSE 2  // キーボード有効/無効
+#define MENUITEM_INDEX_0         0   // ひらがな
+#define MENUITEM_INDEX_1         1   // 英数
+#define MENUITEM_INDEX_OPENCLOSE 2   // キーボード有効/無効
 
-//
-// The descriptions of the menu item of the language bar button.
-//
 static WCHAR c_szMenuItemDescription0[] = L"ひらがな (あ)";
 static WCHAR c_szMenuItemDescription1[] = L"英数 (A)";
 static WCHAR c_szMenuItemDescriptionOpenClose[] = L"キーボードの有効 / 無効";
 
-//+---------------------------------------------------------------------------
+// Globals.cpp 側で定義している GUID
+extern const GUID c_guidLangBarItemButton;  // ブランド用
+// ※モード用は GUID_LBI_INPUTMODE を使う（独自 GUID ではない）
+
 //
-// CLangBarItemButton class
+// CLangBarItemButton
 //
-//----------------------------------------------------------------------------
 
-class CLangBarItemButton : public ITfLangBarItemButton,
-    public ITfSource
-{
-public:
-    CLangBarItemButton(CTextService* pTextService);
-    ~CLangBarItemButton();
-
-    // IUnknown
-    STDMETHODIMP QueryInterface(REFIID riid, void** ppvObj);
-    STDMETHODIMP_(ULONG) AddRef(void);
-    STDMETHODIMP_(ULONG) Release(void);
-
-    // ITfLangBarItem
-    STDMETHODIMP GetInfo(TF_LANGBARITEMINFO* pInfo);
-    STDMETHODIMP GetStatus(DWORD* pdwStatus);
-    STDMETHODIMP Show(BOOL fShow);
-    STDMETHODIMP GetTooltipString(BSTR* pbstrToolTip);
-
-    // ITfLangBarItemButton
-    STDMETHODIMP OnClick(TfLBIClick click, POINT pt, const RECT* prcArea);
-    STDMETHODIMP InitMenu(ITfMenu* pMenu);
-    STDMETHODIMP OnMenuSelect(UINT wID);
-    STDMETHODIMP GetIcon(HICON* phIcon);
-    STDMETHODIMP GetText(BSTR* pbstrText);
-
-    // ITfSource
-    STDMETHODIMP AdviseSink(REFIID riid, IUnknown* punk, DWORD* pdwCookie);
-    STDMETHODIMP UnadviseSink(DWORD dwCookie);
-
-private:
-    ITfLangBarItemSink* _pLangBarItemSink;
-    TF_LANGBARITEMINFO _tfLangBarItemInfo;
-
-    CTextService* _pTextService;
-    LONG _cRef;
-};
-
-//+---------------------------------------------------------------------------
-//
-// ctor
-//
-//----------------------------------------------------------------------------
-
-CLangBarItemButton::CLangBarItemButton(CTextService* pTextService)
+CLangBarItemButton::CLangBarItemButton(CTextService* pTextService, REFGUID guidItem)
 {
     DllAddRef();
-
-    //
-    // initialize TF_LANGBARITEMINFO structure.
-    //
-    _tfLangBarItemInfo.clsidService = c_clsidTextService;    // This LangBarItem belongs to this TextService.
-    _tfLangBarItemInfo.guidItem = c_guidLangBarItemButton; // GUID_LBI_INPUTMODE として宣言済み
-    _tfLangBarItemInfo.dwStyle = TF_LBI_STYLE_BTN_MENU | TF_LBI_STYLE_SHOWNINTRAY;
-    _tfLangBarItemInfo.ulSort = 0;
-    StringCchCopy(_tfLangBarItemInfo.szDescription,
-        ARRAYSIZE(_tfLangBarItemInfo.szDescription),
-        LANGBAR_ITEM_DESC);
-
-    // Initialize the sink pointer to NULL.
-    _pLangBarItemSink = NULL;
+    _cRef = 1;
 
     _pTextService = pTextService;
     _pTextService->AddRef();
 
-    _cRef = 1;
-}
+    _pLangBarItemSink = nullptr;
 
-//+---------------------------------------------------------------------------
-//
-// dtor
-//
-//----------------------------------------------------------------------------
+    ZeroMemory(&_LangBarItemInfo, sizeof(_LangBarItemInfo));
+    _LangBarItemInfo.clsidService = c_clsidTextService;
+    _LangBarItemInfo.guidItem = guidItem;
+
+    // モードアイコン用 GUID_LBI_INPUTMODE のときだけボタン、それ以外（ブランド）はメニュー
+    _LangBarItemInfo.dwStyle =
+        TF_LBI_STYLE_SHOWNINTRAY |
+        (IsEqualGUID(guidItem, GUID_LBI_INPUTMODE)
+            ? TF_LBI_STYLE_BTN_BUTTON
+            : TF_LBI_STYLE_BTN_MENU);
+
+    _LangBarItemInfo.ulSort = 0;
+    wcsncpy_s(_LangBarItemInfo.szDescription,
+        LANGBAR_ITEM_DESC,
+        _TRUNCATE);
+}
 
 CLangBarItemButton::~CLangBarItemButton()
 {
+    if (_pLangBarItemSink)
+    {
+        _pLangBarItemSink->Release();
+        _pLangBarItemSink = nullptr;
+    }
+
+    if (_pTextService)
+    {
+        _pTextService->Release();
+        _pTextService = nullptr;
+    }
+
     DllRelease();
-    _pTextService->Release();
 }
 
-//+---------------------------------------------------------------------------
 //
-// QueryInterface
+// IUnknown
 //
-//----------------------------------------------------------------------------
 
 STDAPI CLangBarItemButton::QueryInterface(REFIID riid, void** ppvObj)
 {
-    if (ppvObj == NULL)
+    if (!ppvObj)
         return E_INVALIDARG;
 
-    *ppvObj = NULL;
+    *ppvObj = nullptr;
 
     if (IsEqualIID(riid, IID_IUnknown) ||
         IsEqualIID(riid, IID_ITfLangBarItem) ||
         IsEqualIID(riid, IID_ITfLangBarItemButton))
     {
-        *ppvObj = (ITfLangBarItemButton*)this;
+        *ppvObj = static_cast<ITfLangBarItemButton*>(this);
     }
     else if (IsEqualIID(riid, IID_ITfSource))
     {
-        *ppvObj = (ITfSource*)this;
+        *ppvObj = static_cast<ITfSource*>(this);
     }
 
     if (*ppvObj)
@@ -154,22 +102,10 @@ STDAPI CLangBarItemButton::QueryInterface(REFIID riid, void** ppvObj)
     return E_NOINTERFACE;
 }
 
-//+---------------------------------------------------------------------------
-//
-// AddRef
-//
-//----------------------------------------------------------------------------
-
 STDAPI_(ULONG) CLangBarItemButton::AddRef()
 {
     return ++_cRef;
 }
-
-//+---------------------------------------------------------------------------
-//
-// Release
-//
-//----------------------------------------------------------------------------
 
 STDAPI_(ULONG) CLangBarItemButton::Release()
 {
@@ -185,171 +121,187 @@ STDAPI_(ULONG) CLangBarItemButton::Release()
     return cr;
 }
 
-//+---------------------------------------------------------------------------
 //
-// GetInfo
+// ITfLangBarItem
 //
-//----------------------------------------------------------------------------
 
 STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo)
 {
-    *pInfo = _tfLangBarItemInfo;
+    if (!pInfo) return E_INVALIDARG;
+    *pInfo = _LangBarItemInfo;
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// GetStatus
-//
-//----------------------------------------------------------------------------
-
 STDAPI CLangBarItemButton::GetStatus(DWORD* pdwStatus)
 {
+    if (!pdwStatus) return E_INVALIDARG;
     *pdwStatus = 0;
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// Show
-//
-//----------------------------------------------------------------------------
-
 STDAPI CLangBarItemButton::Show(BOOL fShow)
 {
     UNREFERENCED_PARAMETER(fShow);
-    return E_NOTIMPL;
+    return S_OK;
 }
-
-//+---------------------------------------------------------------------------
-//
-// GetTooltipString
-//
-//----------------------------------------------------------------------------
 
 STDAPI CLangBarItemButton::GetTooltipString(BSTR* pbstrToolTip)
 {
+    if (!pbstrToolTip) return E_INVALIDARG;
     *pbstrToolTip = SysAllocString(LANGBAR_ITEM_DESC);
-
-    return (*pbstrToolTip == NULL) ? E_OUTOFMEMORY : S_OK;
+    return (*pbstrToolTip == nullptr) ? E_OUTOFMEMORY : S_OK;
 }
 
-//+---------------------------------------------------------------------------
 //
-// OnClick
+// ITfLangBarItemButton
 //
-//----------------------------------------------------------------------------
 
-STDAPI CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT* prcArea)
+STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT* prcArea)
 {
-    UNREFERENCED_PARAMETER(pt);
     UNREFERENCED_PARAMETER(prcArea);
 
-    if (_pTextService == NULL)
+    if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // 左クリックで「あ / A」トグル
-    if (click == TF_LBI_CLK_LEFT)
+    // モードアイコン（GUID_LBI_INPUTMODE）のときだけ特別扱い
+    if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        _pTextService->ToggleInputMode();
-
-        // アイコン / テキスト更新通知
-        if (_pLangBarItemSink)
+        switch (click)
         {
-            _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_TEXT | TF_LBI_STATUS);
+        case TF_LBI_CLK_LEFT:
+            // 左クリックでモードトグル & キーボード ON
+            _pTextService->ToggleInputMode();
+            _pTextService->_SetKeyboardOpen(TRUE);
+            _Update();
+            break;
+
+        case TF_LBI_CLK_RIGHT:
+        {
+            HMENU hMenu = CreatePopupMenu();
+            if (hMenu)
+            {
+                InputMode mode = _pTextService->GetInputMode();
+
+                InsertMenuW(hMenu, -1, MF_BYPOSITION |
+                    (mode == INPUTMODE_HIRAGANA ? MF_CHECKED : 0),
+                    1, L"ひらがな");
+
+                InsertMenuW(hMenu, -1, MF_BYPOSITION |
+                    (mode == INPUTMODE_ALPHANUMERIC ? MF_CHECKED : 0),
+                    2, L"ENG");
+
+                UINT cmd = TrackPopupMenuEx(
+                    hMenu,
+                    TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN |
+                    TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                    pt.x, pt.y,
+                    GetFocus(),
+                    nullptr);
+
+                if (cmd == 1)
+                    _pTextService->SetInputMode(INPUTMODE_HIRAGANA);
+                else if (cmd == 2)
+                    _pTextService->SetInputMode(INPUTMODE_ALPHANUMERIC);
+
+                DestroyMenu(hMenu);
+                _Update();
+            }
+            break;
         }
+
+        default:
+            break;
+        }
+    }
+    else
+    {
+        // ブランドアイコン側クリック（設定ダイアログなど）は必要ならここに書く
     }
 
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// InitMenu
-//
-//----------------------------------------------------------------------------
-
 STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
 {
-    if (pMenu == NULL)
+    if (!pMenu)
         return E_INVALIDARG;
+
+    if (_pTextService == nullptr)
+        return E_UNEXPECTED;
+
+    // メニューを持つのはモードアイコンだけ
+    if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
+    {
+        return S_OK;
+    }
 
     InputMode mode = _pTextService->GetInputMode();
 
-    //
-    // ひらがなメニュー項目
-    //
+    // ひらがな
     DWORD dwFlagsHiragana = 0;
     if (mode == INPUTMODE_HIRAGANA)
-    {
         dwFlagsHiragana |= TF_LBMENUF_CHECKED;
-    }
 
-    pMenu->AddMenuItem(MENUITEM_INDEX_0,
+    pMenu->AddMenuItem(
+        MENUITEM_INDEX_0,
         dwFlagsHiragana,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
         c_szMenuItemDescription0,
         (ULONG)wcslen(c_szMenuItemDescription0),
-        NULL);
+        nullptr);
 
-    //
-    // 英数メニュー項目
-    //
+    // 英数
     DWORD dwFlagsAlnum = 0;
     if (mode == INPUTMODE_ALPHANUMERIC)
-    {
         dwFlagsAlnum |= TF_LBMENUF_CHECKED;
-    }
 
-    pMenu->AddMenuItem(MENUITEM_INDEX_1,
+    pMenu->AddMenuItem(
+        MENUITEM_INDEX_1,
         dwFlagsAlnum,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
         c_szMenuItemDescription1,
         (ULONG)wcslen(c_szMenuItemDescription1),
-        NULL);
+        nullptr);
 
-    //
     // キーボード有効／無効
-    //
     DWORD dwFlagsOpenClose = 0;
     if (_pTextService->_IsKeyboardDisabled())
         dwFlagsOpenClose |= TF_LBMENUF_GRAYED;
     else if (_pTextService->_IsKeyboardOpen())
         dwFlagsOpenClose |= TF_LBMENUF_CHECKED;
 
-    pMenu->AddMenuItem(MENUITEM_INDEX_OPENCLOSE,
+    pMenu->AddMenuItem(
+        MENUITEM_INDEX_OPENCLOSE,
         dwFlagsOpenClose,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
         c_szMenuItemDescriptionOpenClose,
         (ULONG)wcslen(c_szMenuItemDescriptionOpenClose),
-        NULL);
+        nullptr);
 
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// OnMenuSelect
-//
-//----------------------------------------------------------------------------
-
 STDAPI CLangBarItemButton::OnMenuSelect(UINT wID)
 {
-    if (_pTextService == NULL)
+    if (_pTextService == nullptr)
         return E_UNEXPECTED;
+
+    // メニューを持つのはモードアイコンだけ
+    if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
+    {
+        return S_OK;
+    }
 
     switch (wID)
     {
-    case MENUITEM_INDEX_0:
-        // ひらがな
+    case MENUITEM_INDEX_0: // ひらがな
         _pTextService->SetInputMode(INPUTMODE_HIRAGANA);
         break;
 
-    case MENUITEM_INDEX_1:
-        // 英数
+    case MENUITEM_INDEX_1: // 英数
         _pTextService->SetInputMode(INPUTMODE_ALPHANUMERIC);
         break;
 
@@ -372,199 +324,224 @@ STDAPI CLangBarItemButton::OnMenuSelect(UINT wID)
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// GetIcon
-//
-//----------------------------------------------------------------------------
-
-STDAPI CLangBarItemButton::GetIcon(HICON* phIcon)
+STDMETHODIMP CLangBarItemButton::GetIcon(HICON* phIcon)
 {
-    if (phIcon == NULL)
-        return E_INVALIDARG;
+    if (!phIcon) return E_INVALIDARG;
+    *phIcon = nullptr;
 
-    UINT uIconId = 0;
+    return _GetIconInternal(phIcon);
+}
 
-    if (_pTextService != NULL)
+HRESULT CLangBarItemButton::_GetIconInternal(HICON* phIcon)
+{
+    WORD idIcon = IDI_TEXTSERVICE;
+
+    if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        InputMode mode = _pTextService->GetInputMode();
-        switch (mode)
-        {
-        case INPUTMODE_HIRAGANA:
-            uIconId = IDI_MODE_HIRAGANA;      // 「あ」アイコン
-            break;
-        case INPUTMODE_ALPHANUMERIC:
-            uIconId = IDI_MODE_ALPHANUMERIC;  // 「A」アイコン
-            break;
-        default:
-            uIconId = IDI_TEXTSERVICE;        // フォールバック
-            break;
-        }
+        // モードアイコン
+        if (_pTextService->GetInputMode() == INPUTMODE_HIRAGANA)
+            idIcon = IDI_MODE_HIRAGANA;
+        else
+            idIcon = IDI_MODE_ALPHANUMERIC;
     }
     else
     {
-        uIconId = IDI_TEXTSERVICE;
+        // ブランドアイコン
+        idIcon = IDI_TEXTSERVICE;
     }
 
-    *phIcon = (HICON)LoadImage(g_hInst,
-        MAKEINTRESOURCE(uIconId),
+    *phIcon = (HICON)LoadImageW(
+        g_hInst,
+        MAKEINTRESOURCEW(idIcon),
         IMAGE_ICON,
-        16,
-        16,
-        0);
+        0, 0,
+        LR_DEFAULTSIZE | LR_SHARED);
 
-    return (*phIcon != NULL) ? S_OK : E_FAIL;
+    return (*phIcon != nullptr) ? S_OK : E_FAIL;
 }
-
-//+---------------------------------------------------------------------------
-//
-// GetText
-//
-//----------------------------------------------------------------------------
 
 STDAPI CLangBarItemButton::GetText(BSTR* pbstrText)
 {
-    if (pbstrText == NULL)
+    if (!pbstrText)
         return E_INVALIDARG;
 
-    const WCHAR* pszText = NULL;
+    const WCHAR* pszText = nullptr;
 
-    if (_pTextService != NULL)
+    if (_pTextService != nullptr &&
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
+        // モードアイコン側のテキスト
         InputMode mode = _pTextService->GetInputMode();
-        if (mode == INPUTMODE_HIRAGANA)
-        {
-            pszText = L"あ";
-        }
-        else
-        {
-            pszText = L"A";
-        }
+        pszText = (mode == INPUTMODE_HIRAGANA) ? L"あ" : L"A";
     }
     else
     {
+        // ブランドアイコン側 / _pTextService == nullptr
         pszText = LANGBAR_ITEM_DESC;
     }
 
     *pbstrText = SysAllocString(pszText);
-
-    return (*pbstrText == NULL) ? E_OUTOFMEMORY : S_OK;
+    return (*pbstrText == nullptr) ? E_OUTOFMEMORY : S_OK;
 }
 
-//+---------------------------------------------------------------------------
 //
-// AdviseSink
+// ITfSource
 //
-//----------------------------------------------------------------------------
 
 STDAPI CLangBarItemButton::AdviseSink(REFIID riid, IUnknown* punk, DWORD* pdwCookie)
 {
-    //
-    // We allow only ITfLangBarItemSink interface.
-    //
     if (!IsEqualIID(IID_ITfLangBarItemSink, riid))
         return CONNECT_E_CANNOTCONNECT;
 
-    //
-    // We support only one sink once.
-    //
-    if (_pLangBarItemSink != NULL)
+    if (_pLangBarItemSink != nullptr)
         return CONNECT_E_ADVISELIMIT;
 
-    //
-    // Query the ITfLangBarItemSink interface and store it into _pLangBarItemSink.
-    //
     if (punk->QueryInterface(IID_ITfLangBarItemSink, (void**)&_pLangBarItemSink) != S_OK)
     {
-        _pLangBarItemSink = NULL;
+        _pLangBarItemSink = nullptr;
         return E_NOINTERFACE;
     }
 
-    //
-    // return our cookie.
-    //
     *pdwCookie = TEXTSERVICE_LANGBARITEMSINK_COOKIE;
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
-//
-// UnadviseSink
-//
-//----------------------------------------------------------------------------
-
 STDAPI CLangBarItemButton::UnadviseSink(DWORD dwCookie)
 {
-    //
-    // Check the given cookie.
-    //
     if (dwCookie != TEXTSERVICE_LANGBARITEMSINK_COOKIE)
         return CONNECT_E_NOCONNECTION;
 
-    //
-    // If there is no connected sink, we just fail.
-    //
-    if (_pLangBarItemSink == NULL)
+    if (_pLangBarItemSink == nullptr)
         return CONNECT_E_NOCONNECTION;
 
     _pLangBarItemSink->Release();
-    _pLangBarItemSink = NULL;
+    _pLangBarItemSink = nullptr;
 
     return S_OK;
 }
 
-//+---------------------------------------------------------------------------
+HRESULT CLangBarItemButton::_Update()
+{
+    if (_pTextService == nullptr)
+        return E_FAIL;
+
+    // ★ ここが tsf-tutcode と同じ「キーボード入力モードのコンパートメント更新」部分 ★
+    VARIANT var;
+    VariantInit(&var);
+
+    // 文節モード
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = TF_SENTENCEMODE_PHRASEPREDICT;
+    _pTextService->_SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
+
+    // 変換モード
+    if (!_pTextService->_IsKeyboardDisabled() && _pTextService->_IsKeyboardOpen())
+    {
+        InputMode mode = _pTextService->GetInputMode();
+
+        switch (mode)
+        {
+        case INPUTMODE_HIRAGANA:
+            V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+                TF_CONVERSIONMODE_FULLSHAPE |
+                TF_CONVERSIONMODE_ROMAN;
+            _pTextService->_SetCompartment(
+                GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
+            break;
+
+        case INPUTMODE_ALPHANUMERIC:
+        default:
+            V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
+            _pTextService->_SetCompartment(
+                GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
+            break;
+        }
+    }
+
+    if (_pLangBarItemSink == nullptr)
+        return E_FAIL;
+
+    return _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_STATUS);
+}
+
 //
-// _InitLanguageBar
+// CTextService::_InitLanguageBar / _UninitLanguageBar / _UpdateLanguageBar
 //
-//----------------------------------------------------------------------------
 
 BOOL CTextService::_InitLanguageBar()
 {
     ITfLangBarItemMgr* pLangBarItemMgr;
-    BOOL fRet;
+    BOOL fRet = FALSE;
 
     if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr, (void**)&pLangBarItemMgr) != S_OK)
         return FALSE;
 
-    fRet = FALSE;
-
-    if ((_pLangBarItem = new CLangBarItemButton(this)) == NULL)
-        goto Exit;
-
-    if (pLangBarItemMgr->AddItem(_pLangBarItem) != S_OK)
+    // ブランドアイコン（独自 GUID）
+    _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
+    if (_pLangBarItemBrand != nullptr)
     {
-        _pLangBarItem->Release();
-        _pLangBarItem = NULL;
-        goto Exit;
+        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
+        {
+            _pLangBarItemBrand->Release();
+            _pLangBarItemBrand = nullptr;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
     }
 
-    fRet = TRUE;
+    // モードアイコン（★ GUID_LBI_INPUTMODE を使用 ★）
+    _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
+    if (_pLangBarItemMode != nullptr)
+    {
+        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
+        {
+            _pLangBarItemMode->Release();
+            _pLangBarItemMode = nullptr;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
+    }
 
-Exit:
     pLangBarItemMgr->Release();
     return fRet;
 }
-
-//+---------------------------------------------------------------------------
-//
-// _UninitLanguageBar
-//
-//----------------------------------------------------------------------------
 
 void CTextService::_UninitLanguageBar()
 {
     ITfLangBarItemMgr* pLangBarItemMgr;
 
-    if (_pLangBarItem == NULL)
+    if (_pThreadMgr == nullptr)
         return;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr, (void**)&pLangBarItemMgr) == S_OK)
+    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr, (void**)&pLangBarItemMgr) != S_OK)
+        return;
+
+    if (_pLangBarItemBrand != nullptr)
     {
-        pLangBarItemMgr->RemoveItem(_pLangBarItem);
-        pLangBarItemMgr->Release();
+        pLangBarItemMgr->RemoveItem(_pLangBarItemBrand);
+        _pLangBarItemBrand->Release();
+        _pLangBarItemBrand = nullptr;
     }
 
-    _pLangBarItem->Release();
-    _pLangBarItem = NULL;
+    if (_pLangBarItemMode != nullptr)
+    {
+        pLangBarItemMgr->RemoveItem(_pLangBarItemMode);
+        _pLangBarItemMode->Release();
+        _pLangBarItemMode = nullptr;
+    }
+
+    pLangBarItemMgr->Release();
+}
+
+void CTextService::_UpdateLanguageBar()
+{
+    if (_pLangBarItemBrand)
+        _pLangBarItemBrand->_Update();
+
+    if (_pLangBarItemMode)
+        _pLangBarItemMode->_Update();
 }

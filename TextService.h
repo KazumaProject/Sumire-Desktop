@@ -5,8 +5,6 @@
 //  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 //  PARTICULAR PURPOSE.
 //
-//  Copyright (C) 2003  Microsoft Corporation.  All rights reserved.
-//
 //  TextService.h
 //
 //          CTextService declaration.
@@ -16,6 +14,7 @@
 #ifndef TEXTSERVICE_H
 #define TEXTSERVICE_H
 
+#include <msctf.h>
 #include "ComposingText.h"
 #include "RomajiKanaConverter.h"
 
@@ -81,14 +80,17 @@ public:
     static HRESULT CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObj);
 
     ITfThreadMgr* _GetThreadMgr() { return _pThreadMgr; }
-    TfClientId _GetClientId() { return _tfClientId; }
+    TfClientId    _GetClientId() { return _tfClientId; }
     ITfComposition* _GetComposition() { return _pComposition; }
     CCandidateList* _GetCandidateList() { return _pCandidateList; }
 
     // utility function for compartment
-    BOOL _IsKeyboardDisabled();
-    BOOL _IsKeyboardOpen();
+    BOOL    _IsKeyboardDisabled();
+    BOOL    _IsKeyboardOpen();
     HRESULT _SetKeyboardOpen(BOOL fOpen);
+
+    // ★ LanguageBar からも使うコンパートメント更新ヘルパー（public にする）★
+    HRESULT _SetCompartment(REFGUID rguid, const VARIANT* pvar);
 
     // functions for the composition object.
     void _StartComposition(ITfContext* pContext);
@@ -104,9 +106,9 @@ public:
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
 
-    void _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
-    BOOL _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext, TfGuidAtom gaDisplayAttribute);
-    BOOL _InitDisplayAttributeGuidAtom();
+    void  _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
+    BOOL  _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext, TfGuidAtom gaDisplayAttribute);
+    BOOL  _InitDisplayAttributeGuidAtom();
 
     // 入力モードの操作
     void SetInputMode(InputMode mode);
@@ -138,6 +140,7 @@ private:
     // initialize and uninitialize LanguageBar Item.
     BOOL _InitLanguageBar();
     void _UninitLanguageBar();
+    void _UpdateLanguageBar();
 
     // initialize and uninitialize KeyEventSink.
     BOOL _InitKeyEventSink();
@@ -154,7 +157,7 @@ private:
     // state
     //
     ITfThreadMgr* _pThreadMgr;
-    TfClientId _tfClientId;
+    TfClientId    _tfClientId;
 
     // The cookie of ThreadMgrEventSink
     DWORD _dwThreadMgrEventSinkCookie;
@@ -163,9 +166,11 @@ private:
     // private variables for TextEditSink
     //
     ITfContext* _pTextEditSinkContext;
-    DWORD _dwTextEditSinkCookie;
+    DWORD       _dwTextEditSinkCookie;
 
-    CLangBarItemButton* _pLangBarItem;
+    // LangBar items
+    CLangBarItemButton* _pLangBarItemBrand; // ブランドアイコン
+    CLangBarItemButton* _pLangBarItemMode;  // IME モードアイコン
 
     // the current composition object.
     ITfComposition* _pComposition;
