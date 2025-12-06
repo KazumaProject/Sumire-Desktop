@@ -16,6 +16,6 @@
 #include "Resource.h"
 
 IDI_TEXTSERVICE       ICON "sumire_logo.ico"
-IDI_MODE_HIRAGANA     ICON "mode_japanese.ico"
-IDI_MODE_ALPHANUMERIC ICON "mode_english.ico"
+IDI_MODE_HIRAGANA     ICON "pzHiragana.ico"
+IDI_MODE_ALPHANUMERIC ICON "pzJLatin.ico"
 

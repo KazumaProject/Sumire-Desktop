@@ -32,36 +32,49 @@ static const TCHAR c_szModelName[] = TEXT("ThreadingModel");
 
 BOOL RegisterProfiles()
 {
-    ITfInputProcessorProfiles* pInputProcessProfiles;
-    TCHAR achIconFile[MAX_PATH];
-    int cchIconFile;
-    HRESULT hr;
+    HRESULT hr = E_FAIL;
+    WCHAR fileName[MAX_PATH] = {};
 
-    hr = CoCreateInstance(CLSID_TF_InputProcessorProfiles, NULL, CLSCTX_INPROC_SERVER,
-        IID_ITfInputProcessorProfiles, (void**)&pInputProcessProfiles);
+    // ATL の CComPtr は使わず、生ポインタで扱う
+    ITfInputProcessorProfileMgr* pInputProcessorProfileMgr = nullptr;
 
-    if (hr != S_OK)
+    hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfInputProcessorProfileMgr,
+        (void**)&pInputProcessorProfileMgr);
+
+    if (FAILED(hr) || !pInputProcessorProfileMgr)
+    {
         return FALSE;
+    }
 
-    hr = pInputProcessProfiles->Register(c_clsidTextService);
-    if (hr != S_OK)
-        goto Exit;
+    // DLL パス取得
+    if (!GetModuleFileNameW(g_hInst, fileName, _countof(fileName)))
+    {
+        pInputProcessorProfileMgr->Release();
+        return FALSE;
+    }
 
-    cchIconFile = GetModuleFileName(g_hInst, achIconFile, ARRAYSIZE(achIconFile));
-
-    hr = pInputProcessProfiles->AddLanguageProfile(
-        c_clsidTextService,
-        TEXTSERVICE_LANGID,
-        c_guidProfile,
-        TEXTSERVICE_DESC,
+    // プロファイル登録 (Win8 以降推奨 API)
+    hr = pInputProcessorProfileMgr->RegisterProfile(
+        c_clsidTextService,         // TextService CLSID
+        TEXTSERVICE_LANGID,         // LANGID (日本語)
+        c_guidProfile,              // プロファイル GUID
+        TEXTSERVICE_DESC,           // プロファイル名（Globals.h で L"Sumire IME" のように定義）
         (ULONG)wcslen(TEXTSERVICE_DESC),
-        achIconFile,
-        cchIconFile,
-        TEXTSERVICE_ICON_INDEX);
+        fileName,                   // アイコン DLL パス
+        (ULONG)wcslen(fileName),
+        TEXTSERVICE_ICON_INDEX,     // アイコンインデックス
+        nullptr,                    // pchDesc (不要なら nullptr)
+        0,                          // cchDesc
+        TRUE,                       // プロファイルを有効化
+        0);                         // dwFlags
 
-Exit:
-    pInputProcessProfiles->Release();
-    return (hr == S_OK);
+    pInputProcessorProfileMgr->Release();
+
+    return SUCCEEDED(hr);
 }
 
 //+---------------------------------------------------------------------------
@@ -72,13 +85,15 @@ Exit:
 
 void UnregisterProfiles()
 {
-    ITfInputProcessorProfiles* pInputProcessProfiles;
-    HRESULT hr;
+    ITfInputProcessorProfiles* pInputProcessProfiles = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles,
+        NULL,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfInputProcessorProfiles,
+        (void**)&pInputProcessProfiles);
 
-    hr = CoCreateInstance(CLSID_TF_InputProcessorProfiles, NULL, CLSCTX_INPROC_SERVER,
-        IID_ITfInputProcessorProfiles, (void**)&pInputProcessProfiles);
-
-    if (hr != S_OK)
+    if (hr != S_OK || !pInputProcessProfiles)
         return;
 
     pInputProcessProfiles->Unregister(c_clsidTextService);
@@ -93,21 +108,20 @@ void UnregisterProfiles()
 
 BOOL RegisterCategories()
 {
-    ITfCategoryMgr* pCategoryMgr;
-    HRESULT hr;
+    ITfCategoryMgr* pCategoryMgr = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_CategoryMgr,
+        NULL,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfCategoryMgr,
+        (void**)&pCategoryMgr);
 
-    hr = CoCreateInstance(CLSID_TF_CategoryMgr, NULL, CLSCTX_INPROC_SERVER,
-        IID_ITfCategoryMgr, (void**)&pCategoryMgr);
-
-    if (hr != S_OK)
+    if (hr != S_OK || !pCategoryMgr)
         return FALSE;
 
     BOOL fRet = TRUE;
 
-    // ★ここがポイント★
-    // Win8 以降で IME アイコンや切り替えを正常に動かすために、
-    // CATEGORY_OF_TIP / INPUTMODECOMPARTMENT / IMMERSIVESUPPORT / SYSTRAYSUPPORT などを
-    // まとめて登録する。
+    // Win8 以降の IME モードアイコン / トレイ連携に必要なカテゴリ
     const GUID rguidCategories[] =
     {
         // TIP の種別
@@ -135,8 +149,7 @@ BOOL RegisterCategories()
 
         if (hr != S_OK)
         {
-            // ひとつでも失敗したらフラグを落とすが、
-            // 他も試すためにループは回し切る。
+            // ひとつでも失敗したらフラグを落とすが、他も試す
             fRet = FALSE;
         }
     }
@@ -153,13 +166,15 @@ BOOL RegisterCategories()
 
 void UnregisterCategories()
 {
-    ITfCategoryMgr* pCategoryMgr;
-    HRESULT hr;
+    ITfCategoryMgr* pCategoryMgr = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_CategoryMgr,
+        NULL,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfCategoryMgr,
+        (void**)&pCategoryMgr);
 
-    hr = CoCreateInstance(CLSID_TF_CategoryMgr, NULL, CLSCTX_INPROC_SERVER,
-        IID_ITfCategoryMgr, (void**)&pCategoryMgr);
-
-    if (hr != S_OK)
+    if (hr != S_OK || !pCategoryMgr)
         return;
 
     const GUID rguidCategories[] =

@@ -46,7 +46,6 @@ extern const GUID  c_guidProfile;
 //   c_guidLangBarItemButton      : ブランドアイコン用（独自 GUID）
 //   c_guidLangBarItemButtonMode  : IME モードアイコン用（独自 GUID）
 extern const GUID c_guidLangBarItemButton;
-extern const GUID c_guidLangBarItemButtonMode;
 
 // Display Attribute GUID
 extern const GUID c_guidDisplayAttributeInput;

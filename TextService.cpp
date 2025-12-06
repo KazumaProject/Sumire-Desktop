@@ -14,6 +14,7 @@
 #include "Globals.h"
 #include "TextService.h"
 #include "CandidateList.h"
+#include "LanguageBar.h"
 
 //+---------------------------------------------------------------------------
 //
@@ -360,12 +361,10 @@ void CTextService::SetInputMode(InputMode mode)
 
     _inputMode = mode;
 
-    //
-    // 必要に応じてここでコンポジション再描画や
-    // 読みロジックのリセットを行うこともできる。
-    // 現時点ではモードフラグの更新のみ。
-    //
+    // モードが変わったら LangBar アイコン・TSF コンパートメントを更新
+    _UpdateLanguageBar();
 }
+
 
 //+---------------------------------------------------------------------------
 //
@@ -415,4 +414,117 @@ Exit:
     }
 
     return hr;
+}
+
+//+---------------------------------------------------------------------------
+//
+//  _InitLanguageBar
+//
+//----------------------------------------------------------------------------
+BOOL CTextService::_InitLanguageBar()
+{
+    ITfLangBarItemMgr* pLangBarItemMgr;
+    BOOL fRet = FALSE;
+
+    if (_pThreadMgr == NULL)
+        return FALSE;
+
+    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr) != S_OK)
+    {
+        return FALSE;
+    }
+
+    // ブランドアイコン（独自 GUID）
+    _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
+    if (_pLangBarItemBrand != NULL)
+    {
+        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
+        {
+            _pLangBarItemBrand->Release();
+            _pLangBarItemBrand = NULL;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
+    }
+
+    // ★ モードアイコン ⇒ GUID_LBI_INPUTMODE を使う ★
+    _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
+    if (_pLangBarItemMode != NULL)
+    {
+        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
+        {
+            _pLangBarItemMode->Release();
+            _pLangBarItemMode = NULL;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
+    }
+
+    pLangBarItemMgr->Release();
+
+    // 初期状態（ひらがな / キーボード ON）を TSF に通知
+    _UpdateLanguageBar();
+
+    return fRet;
+}
+
+
+//+---------------------------------------------------------------------------
+//
+//  _UninitLanguageBar
+//
+//----------------------------------------------------------------------------
+
+void CTextService::_UninitLanguageBar()
+{
+    ITfLangBarItemMgr* pLangBarItemMgr;
+
+    if (_pThreadMgr == NULL)
+        return;
+
+    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr) != S_OK)
+    {
+        return;
+    }
+
+    if (_pLangBarItemBrand != NULL)
+    {
+        pLangBarItemMgr->RemoveItem(_pLangBarItemBrand);
+        _pLangBarItemBrand->Release();
+        _pLangBarItemBrand = NULL;
+    }
+
+    if (_pLangBarItemMode != NULL)
+    {
+        pLangBarItemMgr->RemoveItem(_pLangBarItemMode);
+        _pLangBarItemMode->Release();
+        _pLangBarItemMode = NULL;
+    }
+
+    pLangBarItemMgr->Release();
+}
+
+//+---------------------------------------------------------------------------
+//
+//  _UpdateLanguageBar
+//
+//----------------------------------------------------------------------------
+
+void CTextService::_UpdateLanguageBar()
+{
+    if (_pLangBarItemBrand)
+    {
+        _pLangBarItemBrand->_Update();
+    }
+
+    if (_pLangBarItemMode)
+    {
+        _pLangBarItemMode->_Update();
+    }
 }

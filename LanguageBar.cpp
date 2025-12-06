@@ -11,17 +11,19 @@
 
 #define TEXTSERVICE_LANGBARITEMSINK_COOKIE 0x0fab0fab
 
+// メニュー ID
 #define MENUITEM_INDEX_0         0   // ひらがな
 #define MENUITEM_INDEX_1         1   // 英数
 #define MENUITEM_INDEX_OPENCLOSE 2   // キーボード有効/無効
 
+// メニュー表示文字列
 static WCHAR c_szMenuItemDescription0[] = L"ひらがな (あ)";
 static WCHAR c_szMenuItemDescription1[] = L"英数 (A)";
 static WCHAR c_szMenuItemDescriptionOpenClose[] = L"キーボードの有効 / 無効";
 
 // Globals.cpp 側で定義している GUID
-extern const GUID c_guidLangBarItemButton;  // ブランド用
-// ※モード用は GUID_LBI_INPUTMODE を使う（独自 GUID ではない）
+extern const GUID c_guidLangBarItemButton;      // ブランド用
+extern const GUID GUID_LBI_INPUTMODE;
 
 //
 // CLangBarItemButton
@@ -33,7 +35,10 @@ CLangBarItemButton::CLangBarItemButton(CTextService* pTextService, REFGUID guidI
     _cRef = 1;
 
     _pTextService = pTextService;
-    _pTextService->AddRef();
+    if (_pTextService)
+    {
+        _pTextService->AddRef();
+    }
 
     _pLangBarItemSink = nullptr;
 
@@ -41,7 +46,8 @@ CLangBarItemButton::CLangBarItemButton(CTextService* pTextService, REFGUID guidI
     _LangBarItemInfo.clsidService = c_clsidTextService;
     _LangBarItemInfo.guidItem = guidItem;
 
-    // モードアイコン用 GUID_LBI_INPUTMODE のときだけボタン、それ以外（ブランド）はメニュー
+    // モードアイコン（c_guidLangBarItemButtonMode）のときはボタン、
+    // それ以外（ブランドアイコン）はメニュー付きボタン。
     _LangBarItemInfo.dwStyle =
         TF_LBI_STYLE_SHOWNINTRAY |
         (IsEqualGUID(guidItem, GUID_LBI_INPUTMODE)
@@ -49,6 +55,8 @@ CLangBarItemButton::CLangBarItemButton(CTextService* pTextService, REFGUID guidI
             : TF_LBI_STYLE_BTN_MENU);
 
     _LangBarItemInfo.ulSort = 0;
+
+    // ツールチップ・LangBar の説明
     wcsncpy_s(_LangBarItemInfo.szDescription,
         LANGBAR_ITEM_DESC,
         _TRUNCATE);
@@ -110,7 +118,6 @@ STDAPI_(ULONG) CLangBarItemButton::AddRef()
 STDAPI_(ULONG) CLangBarItemButton::Release()
 {
     LONG cr = --_cRef;
-
     assert(_cRef >= 0);
 
     if (_cRef == 0)
@@ -148,6 +155,7 @@ STDAPI CLangBarItemButton::Show(BOOL fShow)
 STDAPI CLangBarItemButton::GetTooltipString(BSTR* pbstrToolTip)
 {
     if (!pbstrToolTip) return E_INVALIDARG;
+
     *pbstrToolTip = SysAllocString(LANGBAR_ITEM_DESC);
     return (*pbstrToolTip == nullptr) ? E_OUTOFMEMORY : S_OK;
 }
@@ -163,7 +171,7 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
     if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // モードアイコン（GUID_LBI_INPUTMODE）のときだけ特別扱い
+    // モードアイコン（c_guidLangBarItemButtonMode）かどうか
     if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
         switch (click)
@@ -177,6 +185,7 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
 
         case TF_LBI_CLK_RIGHT:
         {
+            // 右クリックで簡易メニュー（ひらがな / ENG）
             HMENU hMenu = CreatePopupMenu();
             if (hMenu)
             {
@@ -199,9 +208,13 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
                     nullptr);
 
                 if (cmd == 1)
+                {
                     _pTextService->SetInputMode(INPUTMODE_HIRAGANA);
+                }
                 else if (cmd == 2)
+                {
                     _pTextService->SetInputMode(INPUTMODE_ALPHANUMERIC);
+                }
 
                 DestroyMenu(hMenu);
                 _Update();
@@ -215,7 +228,8 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
     }
     else
     {
-        // ブランドアイコン側クリック（設定ダイアログなど）は必要ならここに書く
+        // ブランドアイコン側のクリック（必要なら設定ダイアログなど）
+        // 今は何もしない
     }
 
     return S_OK;
@@ -229,7 +243,7 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
     if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // メニューを持つのはモードアイコンだけ
+    // モードアイコン以外（ブランドアイコン）はここではメニューなし
     if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
         return S_OK;
@@ -265,7 +279,7 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
         (ULONG)wcslen(c_szMenuItemDescription1),
         nullptr);
 
-    // キーボード有効／無効
+    // キーボード有効/無効
     DWORD dwFlagsOpenClose = 0;
     if (_pTextService->_IsKeyboardDisabled())
         dwFlagsOpenClose |= TF_LBMENUF_GRAYED;
@@ -289,9 +303,9 @@ STDAPI CLangBarItemButton::OnMenuSelect(UINT wID)
     if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // メニューを持つのはモードアイコンだけ
     if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
+        // ブランドアイコンのメニューを実装したければここで処理
         return S_OK;
     }
 
@@ -339,7 +353,7 @@ HRESULT CLangBarItemButton::_GetIconInternal(HICON* phIcon)
     if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
         // モードアイコン
-        if (_pTextService->GetInputMode() == INPUTMODE_HIRAGANA)
+        if (_pTextService && _pTextService->GetInputMode() == INPUTMODE_HIRAGANA)
             idIcon = IDI_MODE_HIRAGANA;
         else
             idIcon = IDI_MODE_ALPHANUMERIC;
@@ -370,13 +384,13 @@ STDAPI CLangBarItemButton::GetText(BSTR* pbstrText)
     if (_pTextService != nullptr &&
         IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        // モードアイコン側のテキスト
+        // モードアイコンのテキスト
         InputMode mode = _pTextService->GetInputMode();
         pszText = (mode == INPUTMODE_HIRAGANA) ? L"あ" : L"A";
     }
     else
     {
-        // ブランドアイコン側 / _pTextService == nullptr
+        // ブランドアイコン or TextService 未接続
         pszText = LANGBAR_ITEM_DESC;
     }
 
@@ -425,123 +439,37 @@ HRESULT CLangBarItemButton::_Update()
     if (_pTextService == nullptr)
         return E_FAIL;
 
-    // ★ ここが tsf-tutcode と同じ「キーボード入力モードのコンパートメント更新」部分 ★
     VARIANT var;
     VariantInit(&var);
 
-    // 文節モード
+    // 文節モード（必要なければ削除可）
     V_VT(&var) = VT_I4;
     V_I4(&var) = TF_SENTENCEMODE_PHRASEPREDICT;
-    _pTextService->_SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
+    _pTextService->_SetCompartment(
+        GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
 
-    // 変換モード
+    // 変換モード（ひらがな / ENG）
     if (!_pTextService->_IsKeyboardDisabled() && _pTextService->_IsKeyboardOpen())
     {
         InputMode mode = _pTextService->GetInputMode();
 
-        switch (mode)
+        if (mode == INPUTMODE_HIRAGANA)
         {
-        case INPUTMODE_HIRAGANA:
             V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
                 TF_CONVERSIONMODE_FULLSHAPE |
                 TF_CONVERSIONMODE_ROMAN;
-            _pTextService->_SetCompartment(
-                GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
-            break;
-
-        case INPUTMODE_ALPHANUMERIC:
-        default:
-            V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
-            _pTextService->_SetCompartment(
-                GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
-            break;
         }
+        else
+        {
+            V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
+        }
+
+        _pTextService->_SetCompartment(
+            GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
     }
 
     if (_pLangBarItemSink == nullptr)
         return E_FAIL;
 
-    return _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_STATUS);
-}
-
-//
-// CTextService::_InitLanguageBar / _UninitLanguageBar / _UpdateLanguageBar
-//
-
-BOOL CTextService::_InitLanguageBar()
-{
-    ITfLangBarItemMgr* pLangBarItemMgr;
-    BOOL fRet = FALSE;
-
-    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr, (void**)&pLangBarItemMgr) != S_OK)
-        return FALSE;
-
-    // ブランドアイコン（独自 GUID）
-    _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
-    if (_pLangBarItemBrand != nullptr)
-    {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
-        {
-            _pLangBarItemBrand->Release();
-            _pLangBarItemBrand = nullptr;
-        }
-        else
-        {
-            fRet = TRUE;
-        }
-    }
-
-    // モードアイコン（★ GUID_LBI_INPUTMODE を使用 ★）
-    _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
-    if (_pLangBarItemMode != nullptr)
-    {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
-        {
-            _pLangBarItemMode->Release();
-            _pLangBarItemMode = nullptr;
-        }
-        else
-        {
-            fRet = TRUE;
-        }
-    }
-
-    pLangBarItemMgr->Release();
-    return fRet;
-}
-
-void CTextService::_UninitLanguageBar()
-{
-    ITfLangBarItemMgr* pLangBarItemMgr;
-
-    if (_pThreadMgr == nullptr)
-        return;
-
-    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr, (void**)&pLangBarItemMgr) != S_OK)
-        return;
-
-    if (_pLangBarItemBrand != nullptr)
-    {
-        pLangBarItemMgr->RemoveItem(_pLangBarItemBrand);
-        _pLangBarItemBrand->Release();
-        _pLangBarItemBrand = nullptr;
-    }
-
-    if (_pLangBarItemMode != nullptr)
-    {
-        pLangBarItemMgr->RemoveItem(_pLangBarItemMode);
-        _pLangBarItemMode->Release();
-        _pLangBarItemMode = nullptr;
-    }
-
-    pLangBarItemMgr->Release();
-}
-
-void CTextService::_UpdateLanguageBar()
-{
-    if (_pLangBarItemBrand)
-        _pLangBarItemBrand->_Update();
-
-    if (_pLangBarItemMode)
-        _pLangBarItemMode->_Update();
+    return _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_TEXT | TF_LBI_STATUS);
 }

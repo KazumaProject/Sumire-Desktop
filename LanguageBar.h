@@ -1,11 +1,12 @@
-// LanguageBar.h
+#ifndef LANGUAGEBAR_H
+#define LANGUAGEBAR_H
 
-#pragma once
-
+#include <windows.h>
 #include <msctf.h>
 
 class CTextService;
 
+// Sumire 用 LangBar ボタン実装
 class CLangBarItemButton :
     public ITfLangBarItemButton,
     public ITfSource
@@ -36,7 +37,7 @@ public:
     STDMETHODIMP AdviseSink(REFIID riid, IUnknown* punk, DWORD* pdwCookie);
     STDMETHODIMP UnadviseSink(DWORD dwCookie);
 
-    // TextService からの更新用
+    // TextService から状態変更時に呼ぶ
     HRESULT _Update();
 
 private:
@@ -47,3 +48,5 @@ private:
 
     HRESULT _GetIconInternal(HICON* phIcon);
 };
+
+#endif // LANGUAGEBAR_H

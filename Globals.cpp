@@ -5,6 +5,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "Globals.h"
+#include <initguid.h>
 
 HINSTANCE g_hInst;
 LONG g_cRefDll = -1;
@@ -51,14 +52,6 @@ const GUID c_guidLangBarItemButton = {
     0x9f8a,
     0x4e65,
     {0x9a, 0x3f, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc}
-};
-
-// モードアイコン用 GUID（独自 GUID）
-const GUID c_guidLangBarItemButtonMode = {
-    0x3a9c77e1,
-    0x52ba,
-    0x4b57,
-    {0x81, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
 };
 
 //
