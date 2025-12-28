@@ -60,6 +60,12 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     case VK_SPACE:
         return _pTextService->_HandleSpaceKey(ec, _pContext);
 
+    case VK_BACK:
+        return _pTextService->_HandleBackspaceKey(ec, _pContext);
+
+    case VK_DELETE:
+        return _pTextService->_HandleDeleteKey(ec, _pContext);
+
     default:
         if ((_wParam >= 'A' && _wParam <= 'Z') ||
             (_wParam >= '0' && _wParam <= '9'))
@@ -371,3 +377,85 @@ HRESULT CTextService::_InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPA
 Exit:
     return hr;
 }
+
+HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
+{
+    // composition 中だけ IME が処理する。非 composition ならアプリ側に任せる。
+    if (!_IsComposing() || _pComposition == nullptr)
+    {
+        return S_FALSE; // = IME が食べない想定（呼び側の pfEaten 判定に合わせてください）
+    }
+
+    ITfRange* pRangeComposition = nullptr;
+    TF_SELECTION tfSelection;
+    ULONG cFetched = 0;
+    BOOL fCovered = FALSE;
+
+    // 現在の選択（キャレット）取得
+    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK ||
+        cFetched != 1)
+    {
+        return S_OK; // eat
+    }
+
+    // composition range 取得
+    if (_pComposition->GetRange(&pRangeComposition) == S_OK)
+    {
+        fCovered = IsRangeCovered(ec, tfSelection.range, pRangeComposition);
+    }
+
+    if (!fCovered)
+    {
+        if (pRangeComposition) pRangeComposition->Release();
+        tfSelection.range->Release();
+        return S_OK; // eat（ここはポリシー次第だが、元コードに合わせて eat で OK）
+    }
+
+    // RawText の末尾 1 文字削除
+    bool removed = _composingText.RemoveLastRawChar();
+
+    // 何も消せない（空）なら composition を終了してクリーンにする
+    if (!removed)
+    {
+        if (pRangeComposition) pRangeComposition->Release();
+        tfSelection.range->Release();
+
+        _TerminateComposition(ec, pContext);
+        _composingText.Reset();
+        return S_OK;
+    }
+
+    // Raw -> Surface 更新（カーソルも計算）
+    _composingText.UpdateSurfaceFromRaw(_romajiConverter);
+
+    // ライブ変換はこのタイミングではクリア
+    _composingText.ClearLiveConversionText();
+
+    // composition range 全体を書き換え
+    if (pRangeComposition)
+    {
+        const std::wstring& text = _composingText.GetCurrentText();
+
+        if (pRangeComposition->SetText(ec, 0, text.c_str(), (ULONG)text.size()) == S_OK)
+        {
+            // キャレット末尾へ（要望が末尾削除なので末尾に寄せる）
+            tfSelection.range->Collapse(ec, TF_ANCHOR_END);
+            pContext->SetSelection(ec, 1, &tfSelection);
+        }
+
+        // 表示属性（入力中）
+        _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
+
+        pRangeComposition->Release();
+    }
+
+    tfSelection.range->Release();
+    return S_OK; // eat
+}
+
+HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
+{
+    // 要望が「末尾削除」なので Backspace と同じ挙動にします
+    return _HandleBackspaceKey(ec, pContext);
+}
+

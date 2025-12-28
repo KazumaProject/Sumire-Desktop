@@ -109,6 +109,8 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
     case VK_RIGHT:
     case VK_RETURN:
     case VK_SPACE:
+    case VK_BACK:
+    case VK_DELETE:
         // composition 中だけ IME 側で処理
         if (_IsComposing())
             return TRUE;

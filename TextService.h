@@ -104,6 +104,9 @@ public:
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _HandleDeleteKey(TfEditCookie ec, ITfContext* pContext);
+
     HRESULT _InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
 
     void  _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
