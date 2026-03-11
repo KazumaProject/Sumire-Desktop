@@ -13,6 +13,9 @@
 //
 //////////////////////////////////////////////////////////////////////
 
+#include "Resource.h"
 
-IDI_TEXTSERVICE ICON sumire_logo.ico
+IDI_TEXTSERVICE       ICON "sumire_logo.ico"
+IDI_MODE_HIRAGANA     ICON "pzHiragana.ico"
+IDI_MODE_ALPHANUMERIC ICON "pzJLatin.ico"
 

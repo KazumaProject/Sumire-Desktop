@@ -5,17 +5,16 @@
 //  TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 //  PARTICULAR PURPOSE.
 //
-//  Copyright (C) 2003  Microsoft Corporation.  All rights reserved.
-//
 //  TextService.cpp
 //
 //          IUnknown, ITfTextInputProcessor implementation.
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "globals.h"
+#include "Globals.h"
 #include "TextService.h"
 #include "CandidateList.h"
+#include "LanguageBar.h"
 
 //+---------------------------------------------------------------------------
 //
@@ -24,9 +23,9 @@
 //----------------------------------------------------------------------------
 
 /* static */
-HRESULT CTextService::CreateInstance(IUnknown *pUnkOuter, REFIID riid, void **ppvObj)
+HRESULT CTextService::CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObj)
 {
-    CTextService *pCase;
+    CTextService* pCase;
     HRESULT hr;
 
     if (ppvObj == NULL)
@@ -74,6 +73,12 @@ CTextService::CTextService()
     _dwTextEditSinkCookie = TF_INVALID_COOKIE;
 
     //
+    // Initialize the LanguageBar item pointers.
+    //
+    _pLangBarItemBrand = NULL;
+    _pLangBarItemMode = NULL;
+
+    //
     // Initialize the composition object pointer.
     //
     _pComposition = NULL;
@@ -82,6 +87,24 @@ CTextService::CTextService()
     // Initialize the candidate list object pointer.
     //
     _pCandidateList = NULL;
+
+    //
+    // Initialize display attribute guid atoms.
+    //
+    _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
+    _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
+
+    //
+    // Initialize composing text / romaji converter.
+    //
+    // （特に何もする必要がなければデフォルトコンストラクタに任せる）
+
+    //
+    // 入力モードを既定値（ひらがな）に初期化
+    //
+    _inputMode = INPUTMODE_HIRAGANA;
+
+    _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
 }
@@ -95,6 +118,26 @@ CTextService::CTextService()
 CTextService::~CTextService()
 {
     DllRelease();
+
+    _pThreadMgr = NULL;
+    _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _pTextEditSinkContext = NULL;
+    _dwTextEditSinkCookie = TF_INVALID_COOKIE;
+
+    // LangBar item ポインタ初期化
+    _pLangBarItemBrand = NULL;
+    _pLangBarItemMode = NULL;
+
+    _pComposition = NULL;
+    _pCandidateList = NULL;
+
+    _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
+    _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
+
+    _inputMode = INPUTMODE_HIRAGANA;
+    _tfClientId = TF_CLIENTID_NULL;
+
+    _cRef = 1;
 }
 
 //+---------------------------------------------------------------------------
@@ -103,7 +146,7 @@ CTextService::~CTextService()
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::QueryInterface(REFIID riid, void **ppvObj)
+STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
 {
     if (ppvObj == NULL)
         return E_INVALIDARG;
@@ -111,29 +154,30 @@ STDAPI CTextService::QueryInterface(REFIID riid, void **ppvObj)
     *ppvObj = NULL;
 
     if (IsEqualIID(riid, IID_IUnknown) ||
-        IsEqualIID(riid, IID_ITfTextInputProcessor))
+        IsEqualIID(riid, IID_ITfTextInputProcessor) ||
+        IsEqualIID(riid, IID_ITfTextInputProcessorEx))
     {
-        *ppvObj = (ITfTextInputProcessor *)this;
+        *ppvObj = (ITfTextInputProcessorEx*)this;
     }
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
     {
-        *ppvObj = (ITfThreadMgrEventSink *)this;
+        *ppvObj = (ITfThreadMgrEventSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfTextEditSink))
     {
-        *ppvObj = (ITfTextEditSink *)this;
+        *ppvObj = (ITfTextEditSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfKeyEventSink))
     {
-        *ppvObj = (ITfKeyEventSink *)this;
+        *ppvObj = (ITfKeyEventSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfCompositionSink))
     {
-        *ppvObj = (ITfKeyEventSink *)this;
+        *ppvObj = (ITfCompositionSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfDisplayAttributeProvider))
     {
-        *ppvObj = (ITfDisplayAttributeProvider *)this;
+        *ppvObj = (ITfDisplayAttributeProvider*)this;
     }
 
     if (*ppvObj)
@@ -144,7 +188,6 @@ STDAPI CTextService::QueryInterface(REFIID riid, void **ppvObj)
 
     return E_NOINTERFACE;
 }
-
 
 //+---------------------------------------------------------------------------
 //
@@ -183,19 +226,21 @@ STDAPI_(ULONG) CTextService::Release()
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId)
+STDAPI CTextService::Activate(ITfThreadMgr* pThreadMgr, TfClientId tfClientId)
 {
     return ActivateEx(pThreadMgr, tfClientId, 0);
 }
 
 //+---------------------------------------------------------------------------
 //
-// Activate
+// ActivateEx
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextService::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId, DWORD dwFlags)
+STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId, DWORD dwFlags)
 {
+    UNREFERENCED_PARAMETER(dwFlags);
+
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
@@ -206,11 +251,11 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     if (!_InitThreadMgrEventSink())
         goto ExitError;
 
-    // 
+    //
     //  If there is the focus document manager already,
     //  we advise the TextEditSink.
-    // 
-    ITfDocumentMgr *pDocMgrFocus;
+    //
+    ITfDocumentMgr* pDocMgrFocus;
     if ((_pThreadMgr->GetFocus(&pDocMgrFocus) == S_OK) &&
         (pDocMgrFocus != NULL))
     {
@@ -299,4 +344,187 @@ STDAPI CTextService::Deactivate()
     _tfClientId = TF_CLIENTID_NULL;
 
     return S_OK;
+}
+
+//+---------------------------------------------------------------------------
+//
+// SetInputMode
+//
+//----------------------------------------------------------------------------
+
+void CTextService::SetInputMode(InputMode mode)
+{
+    if (_inputMode == mode)
+    {
+        return;
+    }
+
+    _inputMode = mode;
+
+    // モードが変わったら LangBar アイコン・TSF コンパートメントを更新
+    _UpdateLanguageBar();
+}
+
+
+//+---------------------------------------------------------------------------
+//
+// CTextService::_SetCompartment
+//
+//   GUID_COMPARTMENT_* に値を書き込むヘルパー。
+//   LanguageBar から「ひらがな / 英数」「キーボード ON/OFF」の状態を
+//   OS 側に通知するために使う。
+//
+//----------------------------------------------------------------------------
+
+HRESULT CTextService::_SetCompartment(REFGUID rguid, const VARIANT* pvar)
+{
+    if (_pThreadMgr == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfCompartmentMgr* pCompMgr = NULL;
+    ITfCompartment* pComp = NULL;
+
+    HRESULT hr = _pThreadMgr->QueryInterface(
+        IID_ITfCompartmentMgr,
+        (void**)&pCompMgr);
+    if (FAILED(hr) || !pCompMgr)
+    {
+        goto Exit;
+    }
+
+    hr = pCompMgr->GetCompartment(rguid, &pComp);
+    if (FAILED(hr) || !pComp)
+    {
+        goto Exit;
+    }
+
+    // _tfClientId は Activate / ActivateEx で保存したクライアント ID
+    hr = pComp->SetValue(_tfClientId, pvar);
+
+Exit:
+    if (pComp)
+    {
+        pComp->Release();
+    }
+    if (pCompMgr)
+    {
+        pCompMgr->Release();
+    }
+
+    return hr;
+}
+
+//+---------------------------------------------------------------------------
+//
+//  _InitLanguageBar
+//
+//----------------------------------------------------------------------------
+BOOL CTextService::_InitLanguageBar()
+{
+    ITfLangBarItemMgr* pLangBarItemMgr;
+    BOOL fRet = FALSE;
+
+    if (_pThreadMgr == NULL)
+        return FALSE;
+
+    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr) != S_OK)
+    {
+        return FALSE;
+    }
+
+    // ブランドアイコン（独自 GUID）
+    _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
+    if (_pLangBarItemBrand != NULL)
+    {
+        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
+        {
+            _pLangBarItemBrand->Release();
+            _pLangBarItemBrand = NULL;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
+    }
+
+    // ★ モードアイコン ⇒ GUID_LBI_INPUTMODE を使う ★
+    _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
+    if (_pLangBarItemMode != NULL)
+    {
+        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
+        {
+            _pLangBarItemMode->Release();
+            _pLangBarItemMode = NULL;
+        }
+        else
+        {
+            fRet = TRUE;
+        }
+    }
+
+    pLangBarItemMgr->Release();
+
+    // 初期状態（ひらがな / キーボード ON）を TSF に通知
+    _UpdateLanguageBar();
+
+    return fRet;
+}
+
+
+//+---------------------------------------------------------------------------
+//
+//  _UninitLanguageBar
+//
+//----------------------------------------------------------------------------
+
+void CTextService::_UninitLanguageBar()
+{
+    ITfLangBarItemMgr* pLangBarItemMgr;
+
+    if (_pThreadMgr == NULL)
+        return;
+
+    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr) != S_OK)
+    {
+        return;
+    }
+
+    if (_pLangBarItemBrand != NULL)
+    {
+        pLangBarItemMgr->RemoveItem(_pLangBarItemBrand);
+        _pLangBarItemBrand->Release();
+        _pLangBarItemBrand = NULL;
+    }
+
+    if (_pLangBarItemMode != NULL)
+    {
+        pLangBarItemMgr->RemoveItem(_pLangBarItemMode);
+        _pLangBarItemMode->Release();
+        _pLangBarItemMode = NULL;
+    }
+
+    pLangBarItemMgr->Release();
+}
+
+//+---------------------------------------------------------------------------
+//
+//  _UpdateLanguageBar
+//
+//----------------------------------------------------------------------------
+
+void CTextService::_UpdateLanguageBar()
+{
+    if (_pLangBarItemBrand)
+    {
+        _pLangBarItemBrand->_Update();
+    }
+
+    if (_pLangBarItemMode)
+    {
+        _pLangBarItemMode->_Update();
+    }
 }
