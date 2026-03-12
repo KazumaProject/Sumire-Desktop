@@ -68,6 +68,7 @@ public:
     void _Move(int x, int y);
     void _Begin();
     void _End();
+    void _RefreshFromState();
 
     HRESULT _OnKeyDown(UINT uVKey);
     HRESULT _OnKeyUp(UINT uVKey);

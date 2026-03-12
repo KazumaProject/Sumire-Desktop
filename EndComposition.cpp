@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+﻿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -58,6 +58,8 @@ void CTextService::_TerminateComposition(TfEditCookie ec, ITfContext *pContext)
         _pComposition->Release();
         _pComposition = NULL;
     }
+
+    _ResetCompositionState();
 }
 
 //+---------------------------------------------------------------------------
@@ -77,4 +79,5 @@ void CTextService::_EndComposition(ITfContext *pContext)
         pEditSession->Release();
     }
 }
+
 

@@ -93,7 +93,7 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
     //    - 通常のキー入力はアプリケーションにそのまま流す
     //    - つまりローマ字かな変換は走らない
     //
-    if (_inputMode == INPUTMODE_ALPHANUMERIC)
+    if (GetEffectiveInputMode() == InputMode::DirectInput)
     {
         // 上で F12 だけは TRUE で返しているので、ここでは全て FALSE
         return FALSE;
@@ -111,8 +111,9 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
     case VK_SPACE:
     case VK_BACK:
     case VK_DELETE:
+    case VK_ESCAPE:
         // composition 中だけ IME 側で処理
-        if (_IsComposing())
+        if (GetCompositionPhase() != CompositionPhase::Idle)
             return TRUE;
         return FALSE;
     }
@@ -251,6 +252,7 @@ STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* p
     }
 
     UNREFERENCED_PARAMETER(pContext);
+    _UpdateLanguageBar();
     return S_OK;
 }
 
@@ -356,3 +358,4 @@ void CTextService::_UninitPreservedKey()
 
     pKeystrokeMgr->Release();
 }
+

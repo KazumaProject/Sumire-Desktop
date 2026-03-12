@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+﻿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -57,6 +57,7 @@ STDAPI CTextService::OnSetFocus(ITfDocumentMgr *pDocMgrFocus, ITfDocumentMgr *pD
     // Whenever focus is changed, we initialize the TextEditSink.
     //
     _InitTextEditSink(pDocMgrFocus);
+    _UpdateInputScopeForDocumentMgr(pDocMgrFocus);
 
     return S_OK;
 }
@@ -138,3 +139,4 @@ void CTextService::_UninitThreadMgrEventSink()
 
     _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
 }
+

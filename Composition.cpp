@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+﻿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -34,6 +34,8 @@ STDAPI CTextService::OnCompositionTerminated(TfEditCookie ecWrite, ITfCompositio
         _pComposition = NULL;
     }
 
+    _ResetCompositionState();
+
     return S_OK;
 }
 
@@ -57,5 +59,15 @@ BOOL CTextService::_IsComposing()
 void CTextService::_SetComposition(ITfComposition *pComposition)
 {
     _pComposition = pComposition;
+    if (pComposition != NULL)
+    {
+        _compositionState.Begin();
+        _compositionPhase = _compositionState.GetPhase();
+    }
+    else
+    {
+        _ResetCompositionState();
+    }
 }
+
 

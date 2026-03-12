@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+Ôªø//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -66,6 +66,9 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     case VK_DELETE:
         return _pTextService->_HandleDeleteKey(ec, _pContext);
 
+    case VK_ESCAPE:
+        return _pTextService->_HandleEscapeKey(ec, _pContext);
+
     default:
         if ((_wParam >= 'A' && _wParam <= 'Z') ||
             (_wParam >= '0' && _wParam <= '9'))
@@ -77,29 +80,23 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
 
 }
 
-// îºäpâpêîéö Å® ëSäpâpêîéö Ç…ïœä∑Ç∑ÇÈÉwÉãÉpÅ[
-static WCHAR ToFullWidth(WCHAR ch)
+static WCHAR NormalizeRawInputChar(WCHAR ch, InputMode mode)
 {
-    // êîéö
-    if (ch >= L'0' && ch <= L'9')
+    switch (mode)
     {
-        return (WCHAR)(0xFF10 + (ch - L'0'));   // 'ÇO'Å`'ÇX'
+    case InputMode::Hiragana:
+    case InputMode::HalfwidthKatakana:
+    case InputMode::FullwidthKatakana:
+        if (ch >= L'A' && ch <= L'Z')
+        {
+            return static_cast<WCHAR>(ch - L'A' + L'a');
+        }
+        return ch;
+    case InputMode::DirectInput:
+    case InputMode::FullwidthAlphanumeric:
+    default:
+        return ch;
     }
-
-    // ëÂï∂éöâpéö
-    if (ch >= L'A' && ch <= L'Z')
-    {
-        return (WCHAR)(0xFF21 + (ch - L'A'));   // 'Ç`'Å`'Çy'
-    }
-
-    // è¨ï∂éöâpéöÅiïKóvÇ»ÇÁÅj
-    if (ch >= L'a' && ch <= L'z')
-    {
-        return (WCHAR)(0xFF41 + (ch - L'a'));   // 'ÇÅ'Å`'Çö'
-    }
-
-    // ÇªÇÍà»äOÇÕÇªÇÃÇ‹Ç‹
-    return ch;
 }
 
 
@@ -140,98 +137,23 @@ BOOL IsRangeCovered(TfEditCookie ec, ITfRange* pRangeTest, ITfRange* pRangeCover
 
 HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
 {
-    ITfRange* pRangeComposition = nullptr;
-    TF_SELECTION tfSelection;
-    ULONG cFetched = 0;
-    BOOL fCovered = FALSE;
-
-    // 1. Composition Ç™ñ≥ÇØÇÍÇŒäJénÇ∑ÇÈ
     if (!_IsComposing())
     {
-        _StartComposition(pContext);   // ñﬂÇËílÇÕãCÇ…ÇµÇ»Ç¢
-        _composingText.Reset();        // êVÇµÇ≠énÇﬂÇΩÉ^ÉCÉ~ÉìÉOÇ≈ ComposingText Ç‡ÉäÉZÉbÉg
+        _StartComposition(pContext);
     }
 
-    // 2. ì¸óÕÇ≥ÇÍÇΩÉLÅ[Çï∂éöÇ…ïœä∑Åiå≥ÉRÅ[ÉhÇ∆ìØÇ∂Ç≠ VK Å® WCHARÅj
-    WCHAR ch = (WCHAR)wParam;
-
-    // Åö Ç±Ç±Ç≈îºäp Å® ëSäpÇ…ïœä∑ÅiRawText ÇÕëSäpÉAÉãÉtÉ@ÉxÉbÉgÇ∆ÇµÇƒï€éùÅj
-    ch = ToFullWidth(ch);
-
-    // 3. åªç›ÇÃëIëîÕàÕÅiÉLÉÉÉåÉbÉgà íuÅjÇéÊìæ
-    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK ||
-        cFetched != 1)
+    if (!_IsComposing())
     {
-        return S_FALSE;
+        return E_FAIL;
     }
 
-    // 4. ç°ÇÃÉLÉÉÉåÉbÉgà íuÇ™ composition ÇÃíÜÇ©Ç«Ç§Ç©ämîF
-    if (_pComposition != nullptr && _pComposition->GetRange(&pRangeComposition) == S_OK)
-    {
-        fCovered = IsRangeCovered(ec, tfSelection.range, pRangeComposition);
-    }
+    InputMode mode = GetEffectiveInputMode();
+    WCHAR ch = NormalizeRawInputChar((WCHAR)wParam, mode);
 
-    if (!fCovered)
-    {
-        if (pRangeComposition)
-        {
-            pRangeComposition->Release();
-        }
-        tfSelection.range->Release();
-        return S_OK;
-    }
-
-    // 5. ComposingText ÇÃ RawText Ç… 1 ï∂éöí«â¡
-    //
-    //    ñ{ìñÇÕÅuRawCursor ÇÃà íuÇ…ë}ì¸ÅvÇ™óùëzÇ≈Ç∑Ç™ÅA
-    //    Ç‹Ç∏ÇÕÅuèÌÇ…ññîˆÇ…í«â¡Ç∑ÇÈÅvä»à’î≈Ç∆ÇµÇ‹Ç∑ÅB
-    //    ÅiRawCursor ÇÕèÌÇ…ññîˆÅÅlength Ç…Ç»ÇËÇ‹Ç∑Åj
-    //
-    _composingText.InsertCharAtEnd(ch);
-
-    // Raw ÇÃÉJÅ[É\Éãà íuÇññîˆÇ…ÇªÇÎÇ¶ÇÈ
-    LONG rawLen = (LONG)_composingText.GetRawText().size();
-    _composingText.SetRaw(_composingText.GetRawText(), rawLen);
-
-    // 6. RawText Å® SurfaceText Ç÷ïœä∑
-    //
-    //   - RawText Ç…ÇÕÅuëSäpÉAÉãÉtÉ@ÉxÉbÉgÅvÇ™ãlÇ‹Ç¡ÇƒÇ¢ÇÈ
-    //   - _romajiConverter.ConvertFromRaw() ÇÃì‡ïîÇ≈
-    //       ëSäp Å® îºäp Å® ÉçÅ[É}éöÇ©Ç»ïœä∑
-    //     ÇçsÇ¢ÅAÇ–ÇÁÇ™Ç»ï∂éöóÒÇï‘Ç∑
-    //
-    const std::wstring& raw = _composingText.GetRawText();
-    std::wstring surface = _romajiConverter.ConvertFromRaw(raw);
-
-    LONG surfaceLen = (LONG)surface.size();
-    _composingText.SetSurface(surface, surfaceLen);
-
-    // ÉâÉCÉuïœä∑ÇÕÇ±ÇÃÉ^ÉCÉ~ÉìÉOÇ≈ÇÕÉäÉZÉbÉg
-    _composingText.ClearLiveConversionText();
-
-    // 7. composition ëSëÃÇèëÇ´ä∑Ç¶ÇÈ
-    if (pRangeComposition)
-    {
-        const std::wstring& text = _composingText.GetCurrentText();
-
-        // composition ÇÃîÕàÕëSëÃÇ… SetText
-        if (pRangeComposition->SetText(ec, 0, text.c_str(), (ULONG)text.size()) == S_OK)
-        {
-            // ÉLÉÉÉåÉbÉgÇññîˆÇ…à⁄ìÆÅiå≥ÉRÅ[ÉhÇ∆ìØÇ∂ãììÆÅj
-            tfSelection.range->Collapse(ec, TF_ANCHOR_END);
-            pContext->SetSelection(ec, 1, &tfSelection);
-        }
-
-        pRangeComposition->Release();
-    }
-
-    //
-    // 8. ï\é¶ëÆê´Ç composition ëSëÃÇ…ê›íËÅiå≥ÉRÅ[ÉhÇ∆ìØÇ∂Åj
-    //
-    _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
-
-    tfSelection.range->Release();
-    return S_OK;
+    _compositionState.Begin();
+    _compositionState.InsertRawChar(ch, mode, _romajiConverter);
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
 }
 
 //+---------------------------------------------------------------------------
@@ -242,7 +164,17 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
 
 HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 {
-    // just terminate the composition
+    CompositionPhase phase = _compositionState.GetPhase();
+    if (phase == CompositionPhase::Idle)
+    {
+        return S_OK;
+    }
+
+    if (phase == CompositionPhase::Converting || phase == CompositionPhase::CandidateSelecting)
+    {
+        return _CommitCurrentCandidate(ec, pContext);
+    }
+
     _TerminateComposition(ec, pContext);
     return S_OK;
 }
@@ -255,39 +187,42 @@ HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 {
-    //
-    // set the display attribute to the composition range.
-    //
-    // The real text service may have linguistic logic here and set 
-    // the specific range to apply the display attribute rather than 
-    // applying the display attribute to the entire composition range.
-    //
-    _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeConverted);
-
-    // 
-    // create an instance of the candidate list class.
-    // 
-    if (_pCandidateList == NULL)
-        _pCandidateList = new CCandidateList(this);
-
-    // 
-    // we don't cache the document manager object. So get it from pContext.
-    // 
-    ITfDocumentMgr* pDocumentMgr;
-    if (pContext->GetDocumentMgr(&pDocumentMgr) == S_OK)
+    CompositionPhase phase = _compositionState.GetPhase();
+    if (phase == CompositionPhase::Idle)
     {
-        // 
-        // get the composition range.
-        // 
-        ITfRange* pRange;
-        if (_pComposition->GetRange(&pRange) == S_OK)
-        {
-            _pCandidateList->_StartCandidateList(_tfClientId, pDocumentMgr, pContext, ec, pRange);
-            pRange->Release();
-        }
-        pDocumentMgr->Release();
+        return S_OK;
     }
-    return S_OK;
+
+    if (phase == CompositionPhase::CandidateSelecting)
+    {
+        return _SelectNextCandidate(ec, pContext);
+    }
+
+    if (phase == CompositionPhase::Converting)
+    {
+        _compositionState.EnterCandidateSelecting();
+        _compositionPhase = _compositionState.GetPhase();
+        HRESULT hr = _UpdateCompositionText(ec, pContext);
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+        return _ShowCandidateList(ec, pContext);
+    }
+
+    std::vector<std::wstring> candidates = _kanaKanjiConverter.GenerateCandidates(
+        _compositionState.GetReading(),
+        _compositionState.GetKatakanaText(_romajiConverter),
+        _compositionState.GetHalfwidthRomanText(),
+        _compositionState.GetFullwidthRomanText());
+    if (candidates.empty())
+    {
+        return S_OK;
+    }
+
+    _compositionState.StartConversion(candidates);
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
 }
 
 //+---------------------------------------------------------------------------
@@ -300,52 +235,39 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
 {
-    ITfRange* pRangeComposition;
-    LONG cch;
-    BOOL fEqual;
-    TF_SELECTION tfSelection;
-    ULONG cFetched;
-
-    // get the selection
-    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK ||
-        cFetched != 1)
+    if (!_IsComposing() || _pComposition == NULL)
     {
-        // no selection?
-        return S_OK; // eat the keystroke
+        return S_FALSE;
     }
 
-    // get the composition range
-    if (_pComposition->GetRange(&pRangeComposition) != S_OK)
-        goto Exit;
+    CompositionPhase phase = _compositionState.GetPhase();
+    if (phase == CompositionPhase::CandidateSelecting)
+    {
+        if (wParam == VK_LEFT)
+        {
+            return _SelectFirstCandidate(ec, pContext);
+        }
 
-    // adjust the selection, we won't do anything fancy
+        return _SelectLastCandidate(ec, pContext);
+    }
+
+    if (phase == CompositionPhase::Converting)
+    {
+        _CancelConversion(ec, pContext);
+    }
+
+    InputMode mode = GetEffectiveInputMode();
+
     if (wParam == VK_LEFT)
     {
-        if (tfSelection.range->IsEqualStart(ec, pRangeComposition, TF_ANCHOR_START, &fEqual) == S_OK &&
-            !fEqual)
-        {
-            tfSelection.range->ShiftStart(ec, -1, &cch, NULL);
-        }
-        tfSelection.range->Collapse(ec, TF_ANCHOR_START);
+        _compositionState.MoveLeft(mode, _romajiConverter);
     }
     else
     {
-        // VK_RIGHT
-        if (tfSelection.range->IsEqualEnd(ec, pRangeComposition, TF_ANCHOR_END, &fEqual) == S_OK &&
-            !fEqual)
-        {
-            tfSelection.range->ShiftEnd(ec, +1, &cch, NULL);
-        }
-        tfSelection.range->Collapse(ec, TF_ANCHOR_END);
+        _compositionState.MoveRight(mode, _romajiConverter);
     }
 
-    pContext->SetSelection(ec, 1, &tfSelection);
-
-    pRangeComposition->Release();
-
-Exit:
-    tfSelection.range->Release();
-    return S_OK; // eat the keystroke
+    return _UpdateCompositionText(ec, pContext);
 }
 
 //+---------------------------------------------------------------------------
@@ -380,82 +302,73 @@ Exit:
 
 HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
 {
-    // composition íÜÇæÇØ IME Ç™èàóùÇ∑ÇÈÅBîÒ composition Ç»ÇÁÉAÉvÉäë§Ç…îCÇπÇÈÅB
     if (!_IsComposing() || _pComposition == nullptr)
     {
-        return S_FALSE; // = IME Ç™êHÇ◊Ç»Ç¢ëzíËÅiåƒÇ—ë§ÇÃ pfEaten îªíËÇ…çáÇÌÇπÇƒÇ≠ÇæÇ≥Ç¢Åj
+        return S_FALSE;
     }
 
-    ITfRange* pRangeComposition = nullptr;
-    TF_SELECTION tfSelection;
-    ULONG cFetched = 0;
-    BOOL fCovered = FALSE;
-
-    // åªç›ÇÃëIëÅiÉLÉÉÉåÉbÉgÅjéÊìæ
-    if (pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &cFetched) != S_OK ||
-        cFetched != 1)
+    if (_compositionState.GetPhase() == CompositionPhase::Converting ||
+        _compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
     {
-        return S_OK; // eat
+        return _CancelConversion(ec, pContext);
     }
 
-    // composition range éÊìæ
-    if (_pComposition->GetRange(&pRangeComposition) == S_OK)
+    InputMode mode = GetEffectiveInputMode();
+    if (!_compositionState.Backspace(mode, _romajiConverter))
     {
-        fCovered = IsRangeCovered(ec, tfSelection.range, pRangeComposition);
-    }
-
-    if (!fCovered)
-    {
-        if (pRangeComposition) pRangeComposition->Release();
-        tfSelection.range->Release();
-        return S_OK; // eatÅiÇ±Ç±ÇÕÉ|ÉäÉVÅ[éüëÊÇæÇ™ÅAå≥ÉRÅ[ÉhÇ…çáÇÌÇπÇƒ eat Ç≈ OKÅj
-    }
-
-    // RawText ÇÃññîˆ 1 ï∂éöçÌèú
-    bool removed = _composingText.RemoveLastRawChar();
-
-    // âΩÇ‡è¡ÇπÇ»Ç¢ÅiãÛÅjÇ»ÇÁ composition ÇèIóπÇµÇƒÉNÉäÅ[ÉìÇ…Ç∑ÇÈ
-    if (!removed)
-    {
-        if (pRangeComposition) pRangeComposition->Release();
-        tfSelection.range->Release();
-
-        _TerminateComposition(ec, pContext);
-        _composingText.Reset();
         return S_OK;
     }
 
-    // Raw -> Surface çXêVÅiÉJÅ[É\ÉãÇ‡åvéZÅj
-    _composingText.UpdateSurfaceFromRaw(_romajiConverter);
-
-    // ÉâÉCÉuïœä∑ÇÕÇ±ÇÃÉ^ÉCÉ~ÉìÉOÇ≈ÇÕÉNÉäÉA
-    _composingText.ClearLiveConversionText();
-
-    // composition range ëSëÃÇèëÇ´ä∑Ç¶
-    if (pRangeComposition)
+    if (_compositionState.Empty())
     {
-        const std::wstring& text = _composingText.GetCurrentText();
-
-        if (pRangeComposition->SetText(ec, 0, text.c_str(), (ULONG)text.size()) == S_OK)
-        {
-            // ÉLÉÉÉåÉbÉgññîˆÇ÷Åióvñ]Ç™ññîˆçÌèúÇ»ÇÃÇ≈ññîˆÇ…äÒÇπÇÈÅj
-            tfSelection.range->Collapse(ec, TF_ANCHOR_END);
-            pContext->SetSelection(ec, 1, &tfSelection);
-        }
-
-        // ï\é¶ëÆê´Åiì¸óÕíÜÅj
-        _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
-
-        pRangeComposition->Release();
+        _TerminateComposition(ec, pContext);
+        return S_OK;
     }
 
-    tfSelection.range->Release();
-    return S_OK; // eat
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
 }
 
 HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
 {
-    // óvñ]Ç™ÅuññîˆçÌèúÅvÇ»ÇÃÇ≈ Backspace Ç∆ìØÇ∂ãììÆÇ…ÇµÇ‹Ç∑
-    return _HandleBackspaceKey(ec, pContext);
+    if (!_IsComposing() || _pComposition == nullptr)
+    {
+        return S_FALSE;
+    }
+
+    if (_compositionState.GetPhase() == CompositionPhase::Converting ||
+        _compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
+    {
+        return _CancelConversion(ec, pContext);
+    }
+
+    InputMode mode = GetEffectiveInputMode();
+    if (!_compositionState.Delete(mode, _romajiConverter))
+    {
+        return S_OK;
+    }
+
+    if (_compositionState.Empty())
+    {
+        _TerminateComposition(ec, pContext);
+        return S_OK;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
 }
+
+HRESULT CTextService::_HandleEscapeKey(TfEditCookie ec, ITfContext* pContext)
+{
+    if (_compositionState.GetPhase() != CompositionPhase::Converting &&
+        _compositionState.GetPhase() != CompositionPhase::CandidateSelecting)
+    {
+        return S_OK;
+    }
+
+    HRESULT hr = _CancelConversion(ec, pContext);
+    _CloseCandidateList();
+    return hr;
+}
+
 

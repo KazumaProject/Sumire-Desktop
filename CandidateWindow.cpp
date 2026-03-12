@@ -18,14 +18,12 @@
 #include "CandidateWindow.h"
 #include "EditSession.h"
 #include "CandidateList.h"
-#include "time.h"
-
-#define CAND_WIDTH     200
-#define CAND_HEIGHT    50
+#define CAND_WIDTH     240
+#define CAND_HEIGHT    220
 
 ATOM CCandidateWindow::_atomWndClass = 0;
 
-const TCHAR c_szCandidateDescription[] = TEXT("Dummy Candidate Window");
+const TCHAR c_szCandidateDescription[] = TEXT("Candidate Window");
 
 /* 3e5fdd2d-bbf6-46a9-aded-b480fe18f8d0 */
 const GUID c_guidCandUIElement = {
@@ -128,6 +126,12 @@ CCandidateWindow::CCandidateWindow(CTextService *pTextService)
 
 CCandidateWindow::~CCandidateWindow()
 {
+    for (UINT i = 0; i < _uCandList; i++)
+    {
+        delete[] _arCandStr[i];
+        _arCandStr[i] = NULL;
+    }
+
     _pTextService->Release();
 }
 
@@ -589,89 +593,54 @@ Exit:
 
 void CCandidateWindow::_InitList()
 {
-    BOOL fRand = FALSE;
-    BOOL fLong = FALSE;
-    UINT uListNum = 5;
-
-    //
-    // Get text from composing
-    //
-    _GetCompositionText();
-
-    WCHAR *psz = _szText;
-    if (*psz)
-    {
-        if (*psz == L'R')
-        {
-            fRand = TRUE;
-            psz++;
-        }
-
-        if (*psz == L'L')
-        {
-            fLong = TRUE;
-            psz++;
-        }
-    }
-
-    uListNum = _wtoi(psz);
-
     UINT i;
-    
+
     for (i = 0; i < _uCandList; i++)
     {
         if (_arCandStr[i])
-            delete _arCandStr[i];
-    }
-
-    _uCandList = 0;
-    for (i = 0; i < MAX_CAND_STR; i++)
-        _arCandStr[i] = NULL;
-
-    _uPageCnt = 0;
-    for (i = 0; i < MAX_CAND_STR; i++)
-        _arPageIndex[i] = 0;
-
-    if (uListNum)
-    {
-        if (uListNum > MAX_CAND_STR)
-            uListNum = MAX_CAND_STR;
-
-        _uCandList = uListNum;
-
-        srand( (unsigned)time( NULL ) );
-
-        for (i = 0; i < _uCandList; i++)
         {
-            _arCandStr[i] = new WCHAR[50];
-            if (fLong)
-                StringCchPrintf(_arCandStr[i], 50, L"LongLongLong%d", i);
-            else if (fRand)
-            {
-                int nLen = rand() % 15 + 1;
-                int nCur = 0;
-                while(nCur < nLen)
-                   _arCandStr[i][nCur++] = rand() % 26 + L'A';
-                _arCandStr[i][nCur++] = L'\0';
-            }
-            else
-                StringCchPrintf(_arCandStr[i], 50, L"Test%d", i);
+            delete[] _arCandStr[i];
+            _arCandStr[i] = NULL;
         }
-
-        _uPageCnt = (_uCandList / 10) + 1;
-
-        for (i = 0; i < _uPageCnt; i++)
-            _arPageIndex[i] = i * 10;
-
-        _uSelection = 0;
     }
+
+    const std::vector<std::wstring>& candidates = _pTextService->_GetCompositionState().GetCandidates();
+    _uCandList = static_cast<UINT>(candidates.size());
+    if (_uCandList > MAX_CAND_STR)
+    {
+        _uCandList = MAX_CAND_STR;
+    }
+
+    for (i = 0; i < _uCandList; i++)
+    {
+        size_t len = candidates[i].size() + 1;
+        _arCandStr[i] = new WCHAR[len];
+        StringCchCopy(_arCandStr[i], len, candidates[i].c_str());
+    }
+    for (; i < MAX_CAND_STR; i++)
+    {
+        _arCandStr[i] = NULL;
+    }
+
+    _uPageCnt = (_uCandList == 0) ? 0 : ((_uCandList - 1) / 10) + 1;
+    for (i = 0; i < _uPageCnt; i++)
+    {
+        _arPageIndex[i] = i * 10;
+    }
+    for (; i < MAX_CAND_STR; i++)
+    {
+        _arPageIndex[i] = 0;
+    }
+
+    int selected = _pTextService->_GetCompositionState().GetSelectedCandidateIndex();
+    _uSelection = (selected >= 0 && selected < static_cast<int>(_uCandList)) ? static_cast<UINT>(selected) : 0;
 
     _dwUpdatetFlags = TF_CLUIE_DOCUMENTMGR |
-                      TF_CLUIE_COUNT       |
-                      TF_CLUIE_SELECTION   |
-                      TF_CLUIE_STRING      |
-                      TF_CLUIE_PAGEINDEX   |
-                      TF_CLUIE_CURRENTPAGE;
+        TF_CLUIE_COUNT |
+        TF_CLUIE_SELECTION |
+        TF_CLUIE_STRING |
+        TF_CLUIE_PAGEINDEX |
+        TF_CLUIE_CURRENTPAGE;
 }
 
 //+---------------------------------------------------------------------------
@@ -704,6 +673,16 @@ void CCandidateWindow::_Begin()
         ShowWindow(_hwnd, SW_SHOWNA);
 
     _bInShowMode = TRUE;
+}
+
+void CCandidateWindow::_RefreshFromState()
+{
+    _InitList();
+    _CallUpdateUIElement();
+    if (_hwnd != NULL)
+    {
+        InvalidateRect(_hwnd, NULL, TRUE);
+    }
 }
 
 //+---------------------------------------------------------------------------
@@ -859,21 +838,6 @@ void CCandidateWindow::_PrevPage()
 
 HRESULT CCandidateWindow::_OnKeyDown(UINT uVKey)
 {
-    switch (uVKey)
-    {
-        case VK_UP:
-            _Prev();
-            break;
-        case VK_DOWN:
-            _Next();
-            break;
-        case VK_NEXT:
-            _NextPage();
-            break;
-        case VK_PRIOR:
-            _PrevPage();
-            break;
-    }
     return S_OK;
 }
 
@@ -910,7 +874,35 @@ LRESULT CALLBACK CCandidateWindow::_WindowProc(HWND hwnd, UINT uMsg, WPARAM wPar
         case WM_PAINT:
             hdc = BeginPaint(hwnd, &ps);
             SetBkMode(hdc, TRANSPARENT);
-            TextOut(hdc, 0, 0, c_szCandidateDescription, lstrlen(c_szCandidateDescription));
+            {
+                CCandidateWindow* pThis = _GetThis(hwnd);
+                if (pThis == NULL || pThis->_uCandList == 0)
+                {
+                    TextOut(hdc, 8, 8, c_szCandidateDescription, lstrlen(c_szCandidateDescription));
+                }
+                else
+                {
+                    RECT rcClient;
+                    GetClientRect(hwnd, &rcClient);
+                    FillRect(hdc, &rcClient, (HBRUSH)GetStockObject(WHITE_BRUSH));
+
+                    const int itemHeight = 20;
+                    for (UINT i = 0; i < pThis->_uCandList; i++)
+                    {
+                        RECT rcItem = { 4, 4 + static_cast<int>(i) * itemHeight, rcClient.right - 4, 4 + static_cast<int>(i + 1) * itemHeight };
+                        if (i == pThis->_uSelection)
+                        {
+                            HBRUSH hBrush = CreateSolidBrush(RGB(220, 235, 255));
+                            FillRect(hdc, &rcItem, hBrush);
+                            DeleteObject(hBrush);
+                        }
+
+                        WCHAR szLine[256];
+                        StringCchPrintf(szLine, ARRAYSIZE(szLine), L"%d. %s", i + 1, pThis->_arCandStr[i] ? pThis->_arCandStr[i] : L"");
+                        TextOut(hdc, rcItem.left + 4, rcItem.top + 2, szLine, lstrlen(szLine));
+                    }
+                }
+            }
             EndPaint(hwnd, &ps);
             return 0;
     }
