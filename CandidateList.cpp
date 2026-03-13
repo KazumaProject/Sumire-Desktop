@@ -44,6 +44,21 @@ private:
     CCandidateWindow *_pCandidateWindow;
 };
 
+class CCandidateKeyEditSession : public CEditSessionBase
+{
+public:
+    CCandidateKeyEditSession(CTextService* pTextService, ITfContext* pContext, WPARAM wParam)
+        : CEditSessionBase(pTextService, pContext)
+    {
+        _wParam = wParam;
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec);
+
+private:
+    WPARAM _wParam;
+};
+
 //+---------------------------------------------------------------------------
 //
 // DoEditSession
@@ -58,6 +73,47 @@ STDAPI CGetTextExtentEditSession::DoEditSession(TfEditCookie ec)
     if (SUCCEEDED(_pContextView->GetTextExt(ec, _pRangeComposition, &rc, &fClipped)))
         _pCandidateWindow->_Move(rc.left, rc.bottom);
     return S_OK;
+}
+
+STDAPI CCandidateKeyEditSession::DoEditSession(TfEditCookie ec)
+{
+    HRESULT hr = S_OK;
+
+    switch (_wParam)
+    {
+    case VK_UP:
+        hr = _pTextService->_SelectPrevCandidate(ec, _pContext);
+        break;
+
+    case VK_LEFT:
+        hr = _pTextService->_SelectFirstCandidate(ec, _pContext);
+        break;
+
+    case VK_RIGHT:
+        hr = _pTextService->_SelectLastCandidate(ec, _pContext);
+        break;
+
+    case VK_DOWN:
+    case VK_SPACE:
+        hr = _pTextService->_SelectNextCandidate(ec, _pContext);
+        break;
+
+    case VK_RETURN:
+        hr = _pTextService->_CommitCurrentCandidate(ec, _pContext);
+        return hr;
+
+    case VK_ESCAPE:
+        hr = _pTextService->_CancelConversion(ec, _pContext);
+        return hr;
+
+    case VK_BACK:
+        return _pTextService->_CancelConversion(ec, _pContext);
+
+    case VK_DELETE:
+        return _pTextService->_CancelConversion(ec, _pContext);
+    }
+
+    return hr;
 }
 
 
@@ -173,8 +229,40 @@ STDAPI CCandidateList::OnKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = TRUE;
-    _pCandidateWindow->_OnKeyDown((UINT)wParam);
+    switch (wParam)
+    {
+    case VK_UP:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_DOWN:
+    case VK_SPACE:
+    case VK_RETURN:
+    case VK_ESCAPE:
+    case VK_BACK:
+    case VK_DELETE:
+        *pfEaten = TRUE;
+        break;
+    default:
+        *pfEaten = FALSE;
+        return S_OK;
+    }
+
+    CCandidateKeyEditSession* pEditSession = new CCandidateKeyEditSession(_pTextService, _pContextDocument, wParam);
+    if (pEditSession != NULL)
+    {
+        HRESULT hr = E_FAIL;
+        _pContextDocument->RequestEditSession(_pTextService->_GetClientId(), pEditSession, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+        pEditSession->Release();
+    }
+
+    if (wParam == VK_RETURN || wParam == VK_ESCAPE || wParam == VK_BACK || wParam == VK_DELETE)
+    {
+        _EndCandidateList();
+    }
+    else if (_pCandidateWindow != NULL)
+    {
+        _pCandidateWindow->_RefreshFromState();
+    }
 
     return S_OK;
 }
@@ -190,15 +278,23 @@ STDAPI CCandidateList::OnKeyUp(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = TRUE;
-
-    // 
-    // we eat VK_RETURN here to finish candidate list.
-    // 
-    if (wParam == VK_RETURN)
-        _EndCandidateList();
-    else
-        _pCandidateWindow->_OnKeyUp((UINT)wParam);
+    switch (wParam)
+    {
+    case VK_UP:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_DOWN:
+    case VK_SPACE:
+    case VK_RETURN:
+    case VK_ESCAPE:
+    case VK_BACK:
+    case VK_DELETE:
+        *pfEaten = TRUE;
+        break;
+    default:
+        *pfEaten = FALSE;
+        break;
+    }
 
     return S_OK;
 }
@@ -214,7 +310,23 @@ STDAPI CCandidateList::OnTestKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = TRUE;
+    switch (wParam)
+    {
+    case VK_UP:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_DOWN:
+    case VK_SPACE:
+    case VK_RETURN:
+    case VK_ESCAPE:
+    case VK_BACK:
+    case VK_DELETE:
+        *pfEaten = TRUE;
+        break;
+    default:
+        *pfEaten = FALSE;
+        break;
+    }
 
     return S_OK;
 }
@@ -231,7 +343,19 @@ STDAPI CCandidateList::OnTestKeyUp(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = TRUE;
+    switch (wParam)
+    {
+    case VK_UP:
+    case VK_DOWN:
+    case VK_SPACE:
+    case VK_RETURN:
+    case VK_ESCAPE:
+        *pfEaten = TRUE;
+        break;
+    default:
+        *pfEaten = FALSE;
+        break;
+    }
 
     return S_OK;
 }
@@ -354,9 +478,6 @@ HRESULT CCandidateList::_StartCandidateList(TfClientId tfClientId, ITfDocumentMg
         pContextView->Release();
 
         
-        //
-        // create the dummy candidate window
-        //
         if (!_pCandidateWindow->_Create())
             goto Exit;
 

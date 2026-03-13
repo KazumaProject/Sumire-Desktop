@@ -30,6 +30,24 @@ STDAPI CTextService::OnEndEdit(ITfContext *pContext, TfEditCookie ecReadOnly, IT
     BOOL fSelectionChanged;
     IEnumTfRanges *pEnumTextChanges;
     ITfRange *pRange;
+    BOOL fHasTextChanges = FALSE;
+
+    if (_pendingInternalEdits > 0)
+    {
+        --_pendingInternalEdits;
+        return S_OK;
+    }
+
+    if (pEditRecord->GetTextAndPropertyUpdates(TF_GTP_INCL_TEXT, NULL, 0, &pEnumTextChanges) == S_OK)
+    {
+        if (pEnumTextChanges->Next(1, &pRange, NULL) == S_OK)
+        {
+            fHasTextChanges = TRUE;
+            pRange->Release();
+        }
+
+        pEnumTextChanges->Release();
+    }
 
     //
     // did the selection change?
@@ -54,7 +72,8 @@ STDAPI CTextService::OnEndEdit(ITfContext *pContext, TfEditCookie ecReadOnly, IT
                 // is the insertion point covered by a composition?
                 if (_pComposition->GetRange(&pRangeComposition) == S_OK)
                 {
-                    if (!IsRangeCovered(ecReadOnly, tfSelection.range, pRangeComposition))
+                    if (!IsRangeCovered(ecReadOnly, tfSelection.range, pRangeComposition) &&
+                        !fHasTextChanges)
                     {
                        _EndComposition(pContext);
                     }
@@ -63,21 +82,6 @@ STDAPI CTextService::OnEndEdit(ITfContext *pContext, TfEditCookie ecReadOnly, IT
                 }
             }
         }
-    }
-
-    // text modification?
-    if (pEditRecord->GetTextAndPropertyUpdates(TF_GTP_INCL_TEXT, NULL, 0, &pEnumTextChanges) == S_OK)
-    {
-        if (pEnumTextChanges->Next(1, &pRange, NULL) == S_OK)
-        {
-            //
-            // pRange is the updated range.
-            //
-
-            pRange->Release();
-        }
-
-        pEnumTextChanges->Release();
     }
 
     return S_OK;

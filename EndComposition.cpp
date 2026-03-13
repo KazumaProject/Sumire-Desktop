@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+﻿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -49,15 +49,23 @@ void CTextService::_TerminateComposition(TfEditCookie ec, ITfContext *pContext)
 {
     if (_pComposition != NULL)
     {
+        if (_compositionState.Empty())
+        {
+            _ClearCompositionText(ec, pContext);
+        }
+
         //
         // remove the display attribute from the composition range.
         //
         _ClearCompositionDisplayAttributes(ec, pContext);
 
+        _MarkInternalEdit();
         _pComposition->EndComposition(ec);
         _pComposition->Release();
         _pComposition = NULL;
     }
+
+    _ResetCompositionState();
 }
 
 //+---------------------------------------------------------------------------
@@ -77,4 +85,5 @@ void CTextService::_EndComposition(ITfContext *pContext)
         pEditSession->Release();
     }
 }
+
 

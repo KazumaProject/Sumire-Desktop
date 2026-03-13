@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+﻿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -81,6 +81,7 @@ STDAPI CStartCompositionEditSession::DoEditSession(TfEditCookie ec)
         tfSelection.range = pRangeInsert;
         tfSelection.style.ase = TF_AE_NONE;
         tfSelection.style.fInterimChar = FALSE;
+        _pTextService->_MarkInternalEdit();
         _pContext->SetSelection(ec, 1, &tfSelection);
     }
 
@@ -120,3 +121,4 @@ void CTextService::_StartComposition(ITfContext *pContext)
         pStartCompositionEditSession->Release();
     }
 }
+

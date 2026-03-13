@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -156,8 +156,10 @@
   <ItemGroup>
     <ClCompile Include="CandidateList.cpp" />
     <ClCompile Include="CandidateWindow.cpp" />
+    <ClCompile Include="CompartmentEventSink.cpp" />
     <ClCompile Include="Compartment.cpp" />
     <ClCompile Include="Composition.cpp" />
+    <ClCompile Include="CompositionState.cpp" />
     <ClCompile Include="DisplayAttribute.cpp" />
     <ClCompile Include="DisplayAttributeInfo.cpp" />
     <ClCompile Include="DisplayAttributeProvider.cpp" />
@@ -165,8 +167,11 @@
     <ClCompile Include="EndComposition.cpp" />
     <ClCompile Include="EnumDisplayAttributeInfo.cpp" />
     <ClCompile Include="Globals.cpp" />
+    <ClCompile Include="InputModeState.cpp" />
+    <ClCompile Include="InputScopeEvaluator.cpp" />
     <ClCompile Include="KeyEventSink.cpp" />
     <ClCompile Include="KeyHandler.cpp" />
+    <ClCompile Include="KanaKanjiConverter.cpp" />
     <ClCompile Include="LanguageBar.cpp" />
     <ClCompile Include="PreComp.cpp" />
     <ClCompile Include="Register.cpp" />
@@ -176,15 +181,20 @@
     <ClCompile Include="TextEditSink.cpp" />
     <ClCompile Include="TextService.cpp" />
     <ClCompile Include="ThreadMgrEventSink.cpp" />
+    <ClCompile Include="ThreadFocusSink.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CandidateList.h" />
     <ClInclude Include="CandidateWindow.h" />
+    <ClInclude Include="CompositionState.h" />
     <ClInclude Include="ComposingText.h" />
     <ClInclude Include="DisplayAttributeInfo.h" />
     <ClInclude Include="EditSession.h" />
     <ClInclude Include="EnumDisplayAttributeInfo.h" />
     <ClInclude Include="Globals.h" />
+    <ClInclude Include="InputModeState.h" />
+    <ClInclude Include="InputScopeEvaluator.h" />
+    <ClInclude Include="KanaKanjiConverter.h" />
     <ClInclude Include="LanguageBar.h" />
     <ClInclude Include="msctf.h" />
     <ClInclude Include="Resource.h" />
@@ -198,3 +208,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+

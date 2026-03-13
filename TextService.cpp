@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+Ôªø//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -14,7 +14,25 @@
 #include "Globals.h"
 #include "TextService.h"
 #include "CandidateList.h"
+#include "EditSession.h"
 #include "LanguageBar.h"
+
+extern const GUID GUID_LBI_INPUTMODE;
+
+class CInputScopeUpdateEditSession : public CEditSessionBase
+{
+public:
+    CInputScopeUpdateEditSession(CTextService* pTextService, ITfContext* pContext)
+        : CEditSessionBase(pTextService, pContext)
+    {
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec)
+    {
+        _pTextService->_ApplyInputScopeOverride(_pContext, ec);
+        return S_OK;
+    }
+};
 
 //+---------------------------------------------------------------------------
 //
@@ -65,6 +83,9 @@ CTextService::CTextService()
     // Initialize the numbers for ThreadMgrEventSink.
     //
     _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkOpenCloseCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkInputmodeConversionCookie = TF_INVALID_COOKIE;
 
     //
     // Initialize the numbers for TextEditSink.
@@ -97,12 +118,13 @@ CTextService::CTextService()
     //
     // Initialize composing text / romaji converter.
     //
-    // Åiì¡Ç…âΩÇ‡Ç∑ÇÈïKóvÇ™Ç»ÇØÇÍÇŒÉfÉtÉHÉãÉgÉRÉìÉXÉgÉâÉNÉ^Ç…îCÇπÇÈÅj
+    // ÔºàÁâπ„Å´‰Ωï„ÇÇ„Åô„ÇãÂøÖË¶Å„Åå„Å™„Åë„Çå„Å∞„Éá„Éï„Ç©„É´„Éà„Ç≥„É≥„Çπ„Éà„É©„ÇØ„Çø„Å´‰ªª„Åõ„ÇãÔºâ
 
     //
-    // ì¸óÕÉÇÅ[ÉhÇä˘íËílÅiÇ–ÇÁÇ™Ç»ÅjÇ…èâä˙âª
+    // composition „Çª„ÉÉ„Ç∑„Éß„É≥ÊÆµÈöé„ÇíÊó¢ÂÆöÂÄ§„Å´ÂàùÊúüÂåñ
     //
-    _inputMode = INPUTMODE_HIRAGANA;
+    _compositionPhase = CompositionPhase::Idle;
+    _pendingInternalEdits = 0;
 
     _tfClientId = TF_CLIENTID_NULL;
 
@@ -121,10 +143,13 @@ CTextService::~CTextService()
 
     _pThreadMgr = NULL;
     _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkOpenCloseCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkInputmodeConversionCookie = TF_INVALID_COOKIE;
     _pTextEditSinkContext = NULL;
     _dwTextEditSinkCookie = TF_INVALID_COOKIE;
 
-    // LangBar item É|ÉCÉìÉ^èâä˙âª
+    // LangBar item „Éù„Ç§„É≥„ÇøÂàùÊúüÂåñ
     _pLangBarItemBrand = NULL;
     _pLangBarItemMode = NULL;
 
@@ -134,7 +159,8 @@ CTextService::~CTextService()
     _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
     _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
 
-    _inputMode = INPUTMODE_HIRAGANA;
+    _compositionPhase = CompositionPhase::Idle;
+    _pendingInternalEdits = 0;
     _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
@@ -162,6 +188,14 @@ STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
     {
         *ppvObj = (ITfThreadMgrEventSink*)this;
+    }
+    else if (IsEqualIID(riid, IID_ITfThreadFocusSink))
+    {
+        *ppvObj = (ITfThreadFocusSink*)this;
+    }
+    else if (IsEqualIID(riid, IID_ITfCompartmentEventSink))
+    {
+        *ppvObj = (ITfCompartmentEventSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfTextEditSink))
     {
@@ -241,6 +275,8 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
 {
     UNREFERENCED_PARAMETER(dwFlags);
 
+    DebugLog(L"[ActivateEx] start pThreadMgr=0x%p tfClientId=0x%08X\r\n", pThreadMgr, tfClientId);
+
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
@@ -248,7 +284,19 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     //
     // Initialize ThreadMgrEventSink.
     //
-    if (!_InitThreadMgrEventSink())
+    BOOL fThreadMgrEventSink = _InitThreadMgrEventSink();
+    DebugLogBool(L"[ActivateEx] _InitThreadMgrEventSink", fThreadMgrEventSink);
+    if (!fThreadMgrEventSink)
+        goto ExitError;
+
+    BOOL fThreadFocusSink = _InitThreadFocusSink();
+    DebugLogBool(L"[ActivateEx] _InitThreadFocusSink", fThreadFocusSink);
+    if (!fThreadFocusSink)
+        goto ExitError;
+
+    BOOL fCompartmentEventSink = _InitCompartmentEventSink();
+    DebugLogBool(L"[ActivateEx] _InitCompartmentEventSink", fCompartmentEventSink);
+    if (!fCompartmentEventSink)
         goto ExitError;
 
     //
@@ -266,19 +314,25 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     //
     // Initialize Language Bar.
     //
-    if (!_InitLanguageBar())
+    BOOL fLanguageBar = _InitLanguageBar();
+    DebugLogBool(L"[ActivateEx] _InitLanguageBar", fLanguageBar);
+    if (!fLanguageBar)
         goto ExitError;
 
     //
     // Initialize KeyEventSink
     //
-    if (!_InitKeyEventSink())
+    BOOL fKeyEventSink = _InitKeyEventSink();
+    DebugLogBool(L"[ActivateEx] _InitKeyEventSink", fKeyEventSink);
+    if (!fKeyEventSink)
         goto ExitError;
 
     //
     // Initialize PreservedKeys
     //
-    if (!_InitPreservedKey())
+    BOOL fPreservedKey = _InitPreservedKey();
+    DebugLogBool(L"[ActivateEx] _InitPreservedKey", fPreservedKey);
+    if (!fPreservedKey)
         goto ExitError;
 
     //
@@ -287,9 +341,11 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     if (!_InitDisplayAttributeGuidAtom())
         goto ExitError;
 
+    DebugLog(L"[ActivateEx] success\r\n");
     return S_OK;
 
 ExitError:
+    DebugLog(L"[ActivateEx] ExitError\r\n");
     Deactivate(); // cleanup any half-finished init
     return E_FAIL;
 }
@@ -317,6 +373,8 @@ STDAPI CTextService::Deactivate()
     //
     // Uninitialize ThreadMgrEventSink.
     //
+    _UninitCompartmentEventSink();
+    _UninitThreadFocusSink();
     _UninitThreadMgrEventSink();
 
     //
@@ -352,17 +410,63 @@ STDAPI CTextService::Deactivate()
 //
 //----------------------------------------------------------------------------
 
-void CTextService::SetInputMode(InputMode mode)
+void CTextService::SetUserInputMode(InputMode mode)
 {
-    if (_inputMode == mode)
+    InputMode oldMode = _inputModeState.GetUserInputMode();
+    if (oldMode == mode)
     {
+        DebugLog(L"[SetUserInputMode] old=%d new=%d no-op\r\n",
+            static_cast<int>(oldMode), static_cast<int>(mode));
         return;
     }
 
-    _inputMode = mode;
+    _inputModeState.SetUserInputMode(mode);
 
-    // ÉÇÅ[ÉhÇ™ïœÇÌÇ¡ÇΩÇÁ LangBar ÉAÉCÉRÉìÅETSF ÉRÉìÉpÅ[ÉgÉÅÉìÉgÇçXêV
+    DebugLog(L"[SetUserInputMode] old=%d new=%d effective=%d\r\n",
+        static_cast<int>(oldMode),
+        static_cast<int>(mode),
+        static_cast<int>(_inputModeState.GetEffectiveInputMode()));
     _UpdateLanguageBar();
+}
+
+InputMode CTextService::GetUserInputMode() const
+{
+    return _inputModeState.GetUserInputMode();
+}
+
+InputMode CTextService::GetEffectiveInputMode() const
+{
+    return _inputModeState.GetEffectiveInputMode();
+}
+
+BOOL CTextService::HasInputScopeOverride() const
+{
+    return _inputModeState.HasInputScopeOverride() ? TRUE : FALSE;
+}
+
+void CTextService::SetInputScopeOverride(InputMode mode)
+{
+    _inputModeState.SetInputScopeOverride(mode);
+    _UpdateLanguageBar();
+}
+
+void CTextService::ClearInputScopeOverride()
+{
+    if (_inputModeState.HasInputScopeOverride())
+    {
+        _inputModeState.ClearInputScopeOverride();
+        _UpdateLanguageBar();
+    }
+}
+
+void CTextService::SetCompositionPhase(CompositionPhase phase)
+{
+    _compositionPhase = phase;
+}
+
+CompositionPhase CTextService::GetCompositionPhase() const
+{
+    return _compositionPhase;
 }
 
 
@@ -370,9 +474,9 @@ void CTextService::SetInputMode(InputMode mode)
 //
 // CTextService::_SetCompartment
 //
-//   GUID_COMPARTMENT_* Ç…ílÇèëÇ´çûÇﬁÉwÉãÉpÅ[ÅB
-//   LanguageBar Ç©ÇÁÅuÇ–ÇÁÇ™Ç» / âpêîÅvÅuÉLÅ[É{Å[Éh ON/OFFÅvÇÃèÛë‘Ç
-//   OS ë§Ç…í ímÇ∑ÇÈÇΩÇﬂÇ…égÇ§ÅB
+//   GUID_COMPARTMENT_* „Å´ÂÄ§„ÇíÊõ∏„ÅçËæº„ÇÄ„Éò„É´„Éë„Éº„ÄÇ
+//   LanguageBar „Åã„Çâ„Äå„Å≤„Çâ„Åå„Å™ / Ëã±Êï∞„Äç„Äå„Ç≠„Éº„Éú„Éº„Éâ ON/OFF„Äç„ÅÆÁä∂ÊÖã„Çí
+//   OS ÂÅ¥„Å´ÈÄöÁü•„Åô„Çã„Åü„ÇÅ„Å´‰Ωø„ÅÜ„ÄÇ
 //
 //----------------------------------------------------------------------------
 
@@ -400,7 +504,7 @@ HRESULT CTextService::_SetCompartment(REFGUID rguid, const VARIANT* pvar)
         goto Exit;
     }
 
-    // _tfClientId ÇÕ Activate / ActivateEx Ç≈ï€ë∂ÇµÇΩÉNÉâÉCÉAÉìÉg ID
+    // _tfClientId „ÅØ Activate / ActivateEx „Åß‰øùÂ≠ò„Åó„Åü„ÇØ„É©„Ç§„Ç¢„É≥„Éà ID
     hr = pComp->SetValue(_tfClientId, pvar);
 
 Exit:
@@ -424,53 +528,70 @@ Exit:
 BOOL CTextService::_InitLanguageBar()
 {
     ITfLangBarItemMgr* pLangBarItemMgr;
-    BOOL fRet = FALSE;
+    BOOL fBrandAdded = FALSE;
+    HRESULT hr = S_OK;
+
+    DebugLog(L"[LanguageBar] _InitLanguageBar start\r\n");
 
     if (_pThreadMgr == NULL)
+    {
+        DebugLog(L"[LanguageBar] _InitLanguageBar threadMgr=null\r\n");
         return FALSE;
+    }
 
-    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
-        (void**)&pLangBarItemMgr) != S_OK)
+    hr = _pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr);
+    DebugLogHr(L"[LanguageBar] QueryInterface(ITfLangBarItemMgr)", hr);
+    if (hr != S_OK)
     {
         return FALSE;
     }
 
-    // ÉuÉâÉìÉhÉAÉCÉRÉìÅiì∆é© GUIDÅj
+    // „Éñ„É©„É≥„Éâ„Ç¢„Ç§„Ç≥„É≥ÔºàÁã¨Ëá™ GUIDÔºâ
     _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
+    DebugLog(L"[LanguageBar] brand item %s\r\n", _pLangBarItemBrand != NULL ? L"created" : L"null");
     if (_pLangBarItemBrand != NULL)
     {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
+        hr = pLangBarItemMgr->AddItem(_pLangBarItemBrand);
+        DebugLogHr(L"[LanguageBar] brand AddItem", hr);
+        if (hr != S_OK)
         {
             _pLangBarItemBrand->Release();
             _pLangBarItemBrand = NULL;
         }
         else
         {
-            fRet = TRUE;
+            fBrandAdded = TRUE;
         }
     }
 
-    // Åö ÉÇÅ[ÉhÉAÉCÉRÉì ÅÀ GUID_LBI_INPUTMODE ÇégÇ§ Åö
+    // „É¢„Éº„Éâ„Ç¢„Ç§„Ç≥„É≥„ÅØ OS Ê®ôÊ∫ñ„ÅÆÂÖ•Âäõ„É¢„Éº„Éâ GUID „ÅßÁôªÈå≤„Åô„Çã
     _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
+    DebugLog(L"[LanguageBar] mode item %s\r\n", _pLangBarItemMode != NULL ? L"created" : L"null");
+    DebugLogGuid(L"[LanguageBar] mode item registration", GUID_LBI_INPUTMODE);
     if (_pLangBarItemMode != NULL)
     {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
+        hr = pLangBarItemMgr->AddItem(_pLangBarItemMode);
+        DebugLogHr(L"[LanguageBar] mode AddItem", hr);
+        if (hr != S_OK)
         {
             _pLangBarItemMode->Release();
             _pLangBarItemMode = NULL;
-        }
-        else
-        {
-            fRet = TRUE;
         }
     }
 
     pLangBarItemMgr->Release();
 
-    // èâä˙èÛë‘ÅiÇ–ÇÁÇ™Ç» / ÉLÅ[É{Å[Éh ONÅjÇ TSF Ç…í ím
+    // ÂàùÊúüÁä∂ÊÖã„ÅØ„Å≤„Çâ„Åå„Å™ / „Ç≠„Éº„Éú„Éº„Éâ ON „Å´ÂØÑ„Åõ„Çã„ÄÇ
+    SetUserInputMode(InputMode::Hiragana);
+    _SetKeyboardOpen(TRUE);
+
+    // ÂàùÊúüÁä∂ÊÖãÔºà„Å≤„Çâ„Åå„Å™ / „Ç≠„Éº„Éú„Éº„Éâ ONÔºâ„Çí TSF „Å´ÈÄöÁü•
     _UpdateLanguageBar();
 
-    return fRet;
+    DebugLogBool(L"[LanguageBar] _InitLanguageBar brandAdded", fBrandAdded);
+    DebugLogBool(L"[LanguageBar] _InitLanguageBar return", TRUE);
+    return TRUE;
 }
 
 
@@ -518,6 +639,11 @@ void CTextService::_UninitLanguageBar()
 
 void CTextService::_UpdateLanguageBar()
 {
+    _UpdateLanguageBarCompartments();
+
+    DebugLog(L"[_UpdateLanguageBar] called brand=%s mode=%s\r\n",
+        _pLangBarItemBrand ? L"present" : L"null",
+        _pLangBarItemMode ? L"present" : L"null");
     if (_pLangBarItemBrand)
     {
         _pLangBarItemBrand->_Update();
@@ -528,3 +654,307 @@ void CTextService::_UpdateLanguageBar()
         _pLangBarItemMode->_Update();
     }
 }
+
+void CTextService::_UpdateLanguageBarCompartments()
+{
+    VARIANT var;
+    VariantInit(&var);
+
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = TF_SENTENCEMODE_PHRASEPREDICT;
+    _SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
+
+    if (_IsKeyboardDisabled() || !_IsKeyboardOpen())
+    {
+        return;
+    }
+
+    InputMode mode = GetEffectiveInputMode();
+    switch (mode)
+    {
+    case InputMode::Hiragana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_FULLSHAPE |
+            TF_CONVERSIONMODE_ROMAN;
+        break;
+    case InputMode::FullwidthAlphanumeric:
+        V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC |
+            TF_CONVERSIONMODE_FULLSHAPE;
+        break;
+    case InputMode::HalfwidthKatakana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_KATAKANA;
+        break;
+    case InputMode::FullwidthKatakana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_KATAKANA |
+            TF_CONVERSIONMODE_FULLSHAPE;
+        break;
+    case InputMode::DirectInput:
+    default:
+        V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
+        break;
+    }
+
+    _SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
+}
+
+
+void CTextService::_UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr)
+{
+    if (pDocMgr == NULL)
+    {
+        ClearInputScopeOverride();
+        return;
+    }
+
+    ITfContext* pContext = NULL;
+    if (pDocMgr->GetTop(&pContext) != S_OK || pContext == NULL)
+    {
+        ClearInputScopeOverride();
+        return;
+    }
+
+    CInputScopeUpdateEditSession* pEditSession = new CInputScopeUpdateEditSession(this, pContext);
+    if (pEditSession != NULL)
+    {
+        HRESULT hr = E_FAIL;
+        pContext->RequestEditSession(_tfClientId, pEditSession, TF_ES_SYNC | TF_ES_READ, &hr);
+        pEditSession->Release();
+
+        if (FAILED(hr))
+        {
+            ClearInputScopeOverride();
+        }
+    }
+    else
+    {
+        ClearInputScopeOverride();
+    }
+
+    pContext->Release();
+}
+
+void CTextService::_ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie ec)
+{
+    InputMode overrideMode;
+    if (_inputScopeEvaluator.Evaluate(pContext, ec, &overrideMode))
+    {
+        SetInputScopeOverride(overrideMode);
+    }
+    else
+    {
+        ClearInputScopeOverride();
+    }
+}
+
+void CTextService::_MarkInternalEdit()
+{
+    ++_pendingInternalEdits;
+}
+
+HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pContext)
+{
+    if (_pComposition == NULL || pContext == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfRange* pRangeComposition = NULL;
+    if (_pComposition->GetRange(&pRangeComposition) != S_OK || pRangeComposition == NULL)
+    {
+        return E_FAIL;
+    }
+
+    const std::wstring& preedit = _compositionState.GetPreedit();
+    _MarkInternalEdit();
+    HRESULT hr = pRangeComposition->SetText(ec, 0, preedit.c_str(), static_cast<ULONG>(preedit.size()));
+    if (SUCCEEDED(hr))
+    {
+        TF_SELECTION tfSelection;
+        ITfRange* pSelectionRange = NULL;
+        if (pRangeComposition->Clone(&pSelectionRange) == S_OK && pSelectionRange != NULL)
+        {
+            LONG cch = 0;
+            pSelectionRange->Collapse(ec, TF_ANCHOR_START);
+            if (_compositionState.GetPreeditCursor() > 0)
+            {
+                pSelectionRange->ShiftEnd(ec, _compositionState.GetPreeditCursor(), &cch, NULL);
+                pSelectionRange->Collapse(ec, TF_ANCHOR_END);
+            }
+
+            tfSelection.range = pSelectionRange;
+            tfSelection.style.ase = TF_AE_NONE;
+            tfSelection.style.fInterimChar = FALSE;
+            pContext->SetSelection(ec, 1, &tfSelection);
+            pSelectionRange->Release();
+        }
+
+        TfGuidAtom gaDisplayAttribute = _gaDisplayAttributeInput;
+        if (_compositionState.GetPhase() == CompositionPhase::Converting ||
+            _compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
+        {
+            gaDisplayAttribute = _gaDisplayAttributeConverted;
+        }
+
+        _SetCompositionDisplayAttributes(ec, pContext, gaDisplayAttribute);
+    }
+
+    pRangeComposition->Release();
+    return hr;
+}
+
+HRESULT CTextService::_ClearCompositionText(TfEditCookie ec, ITfContext* pContext)
+{
+    if (_pComposition == NULL || pContext == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfRange* pRangeComposition = NULL;
+    if (_pComposition->GetRange(&pRangeComposition) != S_OK || pRangeComposition == NULL)
+    {
+        return E_FAIL;
+    }
+
+    _MarkInternalEdit();
+    HRESULT hr = pRangeComposition->SetText(ec, 0, L"", 0);
+    if (SUCCEEDED(hr))
+    {
+        TF_SELECTION tfSelection = {};
+        ITfRange* pSelectionRange = NULL;
+        if (pRangeComposition->Clone(&pSelectionRange) == S_OK && pSelectionRange != NULL)
+        {
+            pSelectionRange->Collapse(ec, TF_ANCHOR_START);
+            tfSelection.range = pSelectionRange;
+            tfSelection.style.ase = TF_AE_NONE;
+            tfSelection.style.fInterimChar = FALSE;
+            pContext->SetSelection(ec, 1, &tfSelection);
+            pSelectionRange->Release();
+        }
+    }
+
+    pRangeComposition->Release();
+    return hr;
+}
+
+void CTextService::_ResetCompositionState()
+{
+    _compositionState.Reset();
+    _composingText.Reset();
+    _compositionPhase = CompositionPhase::Idle;
+}
+
+HRESULT CTextService::_SelectNextCandidate(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectNextCandidate())
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectPrevCandidate())
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_SelectFirstCandidate(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectFirstCandidate())
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_SelectLastCandidate(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectLastCandidate())
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_CommitCurrentCandidate(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.HasSelectedCandidate())
+    {
+        _TerminateComposition(ec, pContext);
+        return S_OK;
+    }
+
+    HRESULT hr = _UpdateCompositionText(ec, pContext);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    _TerminateComposition(ec, pContext);
+    return S_OK;
+}
+
+HRESULT CTextService::_CancelConversion(TfEditCookie ec, ITfContext* pContext)
+{
+    _compositionState.CancelConversion(GetEffectiveInputMode(), _romajiConverter);
+    _compositionPhase = _compositionState.GetPhase();
+
+    if (_compositionPhase == CompositionPhase::Idle)
+    {
+        _TerminateComposition(ec, pContext);
+        return S_OK;
+    }
+
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_ShowCandidateList(TfEditCookie ec, ITfContext* pContext)
+{
+    if (_pCandidateList == NULL)
+    {
+        _pCandidateList = new CCandidateList(this);
+        if (_pCandidateList == NULL)
+        {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    ITfDocumentMgr* pDocumentMgr = NULL;
+    if (pContext->GetDocumentMgr(&pDocumentMgr) != S_OK || pDocumentMgr == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfRange* pRange = NULL;
+    HRESULT hr = E_FAIL;
+    if (_pComposition->GetRange(&pRange) == S_OK)
+    {
+        hr = _pCandidateList->_StartCandidateList(_tfClientId, pDocumentMgr, pContext, ec, pRange);
+        pRange->Release();
+    }
+
+    pDocumentMgr->Release();
+    return hr;
+}
+
+void CTextService::_CloseCandidateList()
+{
+    if (_pCandidateList != NULL)
+    {
+        _pCandidateList->_EndCandidateList();
+    }
+}
+

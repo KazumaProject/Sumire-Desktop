@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+ï»¿//////////////////////////////////////////////////////////////////////
 //
 //  LanguageBar.cpp
 //
@@ -11,18 +11,18 @@
 
 #define TEXTSERVICE_LANGBARITEMSINK_COOKIE 0x0fab0fab
 
-// ƒƒjƒ…[ ID
-#define MENUITEM_INDEX_0         0   // ‚Ð‚ç‚ª‚È
-#define MENUITEM_INDEX_1         1   // ‰p”
-#define MENUITEM_INDEX_OPENCLOSE 2   // ƒL[ƒ{[ƒh—LŒø/–³Œø
+// ãƒ¡ãƒ‹ãƒ¥ãƒ¼ ID
+#define MENUITEM_INDEX_0         0   // ã²ã‚‰ãŒãª
+#define MENUITEM_INDEX_1         1   // è‹±æ•°
+#define MENUITEM_INDEX_OPENCLOSE 2   // ã‚­ãƒ¼ãƒœãƒ¼ãƒ‰æœ‰åŠ¹/ç„¡åŠ¹
 
-// ƒƒjƒ…[•\Ž¦•¶Žš—ñ
-static WCHAR c_szMenuItemDescription0[] = L"‚Ð‚ç‚ª‚È (‚ )";
-static WCHAR c_szMenuItemDescription1[] = L"‰p” (A)";
-static WCHAR c_szMenuItemDescriptionOpenClose[] = L"ƒL[ƒ{[ƒh‚Ì—LŒø / –³Œø";
+// ãƒ¡ãƒ‹ãƒ¥ãƒ¼è¡¨ç¤ºæ–‡å­—åˆ—
+static WCHAR c_szMenuItemDescription0[] = L"ã²ã‚‰ãŒãª (ã‚)";
+static WCHAR c_szMenuItemDescription1[] = L"ç›´æŽ¥å…¥åŠ› (A)";
+static WCHAR c_szMenuItemDescriptionOpenClose[] = L"ã‚­ãƒ¼ãƒœãƒ¼ãƒ‰ã®æœ‰åŠ¹ / ç„¡åŠ¹";
 
-// Globals.cpp ‘¤‚Å’è‹`‚µ‚Ä‚¢‚é GUID
-extern const GUID c_guidLangBarItemButton;      // ƒuƒ‰ƒ“ƒh—p
+// Globals.cpp å´ã§å®šç¾©ã—ã¦ã„ã‚‹ GUID
+extern const GUID c_guidLangBarItemButton;      // ãƒ–ãƒ©ãƒ³ãƒ‰ç”¨
 extern const GUID GUID_LBI_INPUTMODE;
 
 //
@@ -46,20 +46,23 @@ CLangBarItemButton::CLangBarItemButton(CTextService* pTextService, REFGUID guidI
     _LangBarItemInfo.clsidService = c_clsidTextService;
     _LangBarItemInfo.guidItem = guidItem;
 
-    // ƒ‚[ƒhƒAƒCƒRƒ“ic_guidLangBarItemButtonModej‚Ì‚Æ‚«‚Íƒ{ƒ^ƒ“A
-    // ‚»‚êˆÈŠOiƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“j‚Íƒƒjƒ…[•t‚«ƒ{ƒ^ƒ“B
+    // ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ï¼ˆGUID_LBI_INPUTMODEï¼‰ã®ã¨ãã¯ãƒœã‚¿ãƒ³ã€
+    // ãã‚Œä»¥å¤–ï¼ˆãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ï¼‰ã¯ãƒ¡ãƒ‹ãƒ¥ãƒ¼ä»˜ããƒœã‚¿ãƒ³ã€‚
     _LangBarItemInfo.dwStyle =
         TF_LBI_STYLE_SHOWNINTRAY |
         (IsEqualGUID(guidItem, GUID_LBI_INPUTMODE)
             ? TF_LBI_STYLE_BTN_BUTTON
             : TF_LBI_STYLE_BTN_MENU);
 
-    _LangBarItemInfo.ulSort = 0;
+    _LangBarItemInfo.ulSort = 1;
 
-    // ƒc[ƒ‹ƒ`ƒbƒvELangBar ‚Ìà–¾
+    // ãƒ„ãƒ¼ãƒ«ãƒãƒƒãƒ—ãƒ»LangBar ã®èª¬æ˜Ž
     wcsncpy_s(_LangBarItemInfo.szDescription,
         LANGBAR_ITEM_DESC,
         _TRUNCATE);
+
+    DebugLogGuid(L"[LanguageBar] CLangBarItemButton::ctor guidItem", guidItem);
+    DebugLog(L"[LanguageBar] CLangBarItemButton::ctor dwStyle=0x%08X\r\n", _LangBarItemInfo.dwStyle);
 }
 
 CLangBarItemButton::~CLangBarItemButton()
@@ -136,20 +139,44 @@ STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo)
 {
     if (!pInfo) return E_INVALIDARG;
     *pInfo = _LangBarItemInfo;
+    DebugLogGuid(L"[LanguageBar] GetInfo guidItem", _LangBarItemInfo.guidItem);
+    DebugLogGuid(L"[LanguageBar] GetInfo clsidService", _LangBarItemInfo.clsidService);
+    DebugLog(L"[LanguageBar] GetInfo dwStyle=0x%08X\r\n", _LangBarItemInfo.dwStyle);
     return S_OK;
 }
 
 STDAPI CLangBarItemButton::GetStatus(DWORD* pdwStatus)
 {
     if (!pdwStatus) return E_INVALIDARG;
-    *pdwStatus = 0;
+
+    if (_pTextService && _pTextService->_IsKeyboardDisabled())
+    {
+        *pdwStatus = TF_LBI_STATUS_DISABLED;
+    }
+    else
+    {
+        *pdwStatus = 0;
+    }
+
+    DebugLog(L"[LanguageBar] GetStatus guid=%s status=0x%08X\r\n",
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE) ? L"mode" : L"brand",
+        *pdwStatus);
     return S_OK;
 }
 
 STDAPI CLangBarItemButton::Show(BOOL fShow)
 {
+    DebugLog(L"[LanguageBar] Show guid=%s fShow=%s\r\n",
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE) ? L"mode" : L"brand",
+        fShow ? L"TRUE" : L"FALSE");
     UNREFERENCED_PARAMETER(fShow);
-    return S_OK;
+
+    if (_pLangBarItemSink == nullptr)
+    {
+        return E_FAIL;
+    }
+
+    return _pLangBarItemSink->OnUpdate(TF_LBI_STATUS);
 }
 
 STDAPI CLangBarItemButton::GetTooltipString(BSTR* pbstrToolTip)
@@ -171,13 +198,13 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
     if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // ƒ‚[ƒhƒAƒCƒRƒ“ic_guidLangBarItemButtonModej‚©‚Ç‚¤‚©
+    // ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ï¼ˆGUID_LBI_INPUTMODEï¼‰ã‹ã©ã†ã‹
     if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
         switch (click)
         {
         case TF_LBI_CLK_LEFT:
-            // ¶ƒNƒŠƒbƒN‚Åƒ‚[ƒhƒgƒOƒ‹ & ƒL[ƒ{[ƒh ON
+            // å·¦ã‚¯ãƒªãƒƒã‚¯ã§ãƒ¢ãƒ¼ãƒ‰ãƒˆã‚°ãƒ«
             _pTextService->ToggleInputMode();
             _pTextService->_SetKeyboardOpen(TRUE);
             _Update();
@@ -185,19 +212,19 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
 
         case TF_LBI_CLK_RIGHT:
         {
-            // ‰EƒNƒŠƒbƒN‚ÅŠÈˆÕƒƒjƒ…[i‚Ð‚ç‚ª‚È / ENGj
+            // å³ã‚¯ãƒªãƒƒã‚¯ã§ç°¡æ˜“ãƒ¡ãƒ‹ãƒ¥ãƒ¼ï¼ˆã²ã‚‰ãŒãª / ENGï¼‰
             HMENU hMenu = CreatePopupMenu();
             if (hMenu)
             {
-                InputMode mode = _pTextService->GetInputMode();
+                InputMode mode = _pTextService->GetUserInputMode();
 
                 InsertMenuW(hMenu, -1, MF_BYPOSITION |
-                    (mode == INPUTMODE_HIRAGANA ? MF_CHECKED : 0),
-                    1, L"‚Ð‚ç‚ª‚È");
+                    (mode == InputMode::Hiragana ? MF_CHECKED : 0),
+                    1, L"ã²ã‚‰ãŒãª");
 
                 InsertMenuW(hMenu, -1, MF_BYPOSITION |
-                    (mode == INPUTMODE_ALPHANUMERIC ? MF_CHECKED : 0),
-                    2, L"ENG");
+                    (mode == InputMode::DirectInput ? MF_CHECKED : 0),
+                    2, L"ç›´æŽ¥å…¥åŠ›");
 
                 UINT cmd = TrackPopupMenuEx(
                     hMenu,
@@ -209,11 +236,13 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
 
                 if (cmd == 1)
                 {
-                    _pTextService->SetInputMode(INPUTMODE_HIRAGANA);
+                    _pTextService->SetUserInputMode(InputMode::Hiragana);
+                    _pTextService->_SetKeyboardOpen(TRUE);
                 }
                 else if (cmd == 2)
                 {
-                    _pTextService->SetInputMode(INPUTMODE_ALPHANUMERIC);
+                    _pTextService->SetUserInputMode(InputMode::DirectInput);
+                    _pTextService->_SetKeyboardOpen(TRUE);
                 }
 
                 DestroyMenu(hMenu);
@@ -228,8 +257,8 @@ STDMETHODIMP CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT*
     }
     else
     {
-        // ƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“‘¤‚ÌƒNƒŠƒbƒNi•K—v‚È‚çÝ’èƒ_ƒCƒAƒƒO‚È‚Çj
-        // ¡‚Í‰½‚à‚µ‚È‚¢
+        // ãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³å´ã®ã‚¯ãƒªãƒƒã‚¯ï¼ˆå¿…è¦ãªã‚‰è¨­å®šãƒ€ã‚¤ã‚¢ãƒ­ã‚°ãªã©ï¼‰
+        // ä»Šã¯ä½•ã‚‚ã—ãªã„
     }
 
     return S_OK;
@@ -243,17 +272,17 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
     if (_pTextService == nullptr)
         return E_UNEXPECTED;
 
-    // ƒ‚[ƒhƒAƒCƒRƒ“ˆÈŠOiƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“j‚Í‚±‚±‚Å‚Íƒƒjƒ…[‚È‚µ
+    // ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ä»¥å¤–ï¼ˆãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ï¼‰ã¯ã“ã“ã§ã¯ãƒ¡ãƒ‹ãƒ¥ãƒ¼ãªã—
     if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
         return S_OK;
     }
 
-    InputMode mode = _pTextService->GetInputMode();
+    InputMode mode = _pTextService->GetUserInputMode();
 
-    // ‚Ð‚ç‚ª‚È
+    // ã²ã‚‰ãŒãª
     DWORD dwFlagsHiragana = 0;
-    if (mode == INPUTMODE_HIRAGANA)
+    if (mode == InputMode::Hiragana)
         dwFlagsHiragana |= TF_LBMENUF_CHECKED;
 
     pMenu->AddMenuItem(
@@ -265,9 +294,9 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
         (ULONG)wcslen(c_szMenuItemDescription0),
         nullptr);
 
-    // ‰p”
+    // è‹±æ•°
     DWORD dwFlagsAlnum = 0;
-    if (mode == INPUTMODE_ALPHANUMERIC)
+    if (mode == InputMode::DirectInput)
         dwFlagsAlnum |= TF_LBMENUF_CHECKED;
 
     pMenu->AddMenuItem(
@@ -279,7 +308,7 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
         (ULONG)wcslen(c_szMenuItemDescription1),
         nullptr);
 
-    // ƒL[ƒ{[ƒh—LŒø/–³Œø
+    // ã‚­ãƒ¼ãƒœãƒ¼ãƒ‰æœ‰åŠ¹/ç„¡åŠ¹
     DWORD dwFlagsOpenClose = 0;
     if (_pTextService->_IsKeyboardDisabled())
         dwFlagsOpenClose |= TF_LBMENUF_GRAYED;
@@ -305,18 +334,20 @@ STDAPI CLangBarItemButton::OnMenuSelect(UINT wID)
 
     if (!IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        // ƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“‚Ìƒƒjƒ…[‚ðŽÀ‘•‚µ‚½‚¯‚ê‚Î‚±‚±‚Åˆ—
+        // ãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ã®ãƒ¡ãƒ‹ãƒ¥ãƒ¼ã‚’å®Ÿè£…ã—ãŸã‘ã‚Œã°ã“ã“ã§å‡¦ç†
         return S_OK;
     }
 
     switch (wID)
     {
-    case MENUITEM_INDEX_0: // ‚Ð‚ç‚ª‚È
-        _pTextService->SetInputMode(INPUTMODE_HIRAGANA);
+    case MENUITEM_INDEX_0: // ã²ã‚‰ãŒãª
+        _pTextService->SetUserInputMode(InputMode::Hiragana);
+        _pTextService->_SetKeyboardOpen(TRUE);
         break;
 
-    case MENUITEM_INDEX_1: // ‰p”
-        _pTextService->SetInputMode(INPUTMODE_ALPHANUMERIC);
+    case MENUITEM_INDEX_1: // ç›´æŽ¥å…¥åŠ›
+        _pTextService->SetUserInputMode(InputMode::DirectInput);
+        _pTextService->_SetKeyboardOpen(TRUE);
         break;
 
     case MENUITEM_INDEX_OPENCLOSE:
@@ -342,34 +373,60 @@ STDMETHODIMP CLangBarItemButton::GetIcon(HICON* phIcon)
 {
     if (!phIcon) return E_INVALIDARG;
     *phIcon = nullptr;
-
-    return _GetIconInternal(phIcon);
+    HRESULT hr = _GetIconInternal(phIcon);
+    DebugLog(L"[LanguageBar] GetIcon guid=%s hr=0x%08X icon=0x%p\r\n",
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE) ? L"mode" : L"brand",
+        hr,
+        *phIcon);
+    return hr;
 }
 
 HRESULT CLangBarItemButton::_GetIconInternal(HICON* phIcon)
 {
     WORD idIcon = IDI_TEXTSERVICE;
+    int size = 16;
 
     if (IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        // ƒ‚[ƒhƒAƒCƒRƒ“
-        if (_pTextService && _pTextService->GetInputMode() == INPUTMODE_HIRAGANA)
-            idIcon = IDI_MODE_HIRAGANA;
+        // ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³
+        if (_pTextService)
+        {
+            InputMode mode = _pTextService->GetEffectiveInputMode();
+            if (mode == InputMode::Hiragana ||
+                mode == InputMode::HalfwidthKatakana ||
+                mode == InputMode::FullwidthKatakana)
+            {
+                idIcon = IDI_MODE_HIRAGANA;
+            }
+            else
+            {
+                idIcon = IDI_MODE_ALPHANUMERIC;
+            }
+        }
         else
-            idIcon = IDI_MODE_ALPHANUMERIC;
+        {
+            idIcon = IDI_MODE_HIRAGANA;
+        }
     }
     else
     {
-        // ƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“
+        // ãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³
         idIcon = IDI_TEXTSERVICE;
+    }
+
+    HDC hdc = GetDC(nullptr);
+    if (hdc != nullptr)
+    {
+        size = MulDiv(16, GetDeviceCaps(hdc, LOGPIXELSY), USER_DEFAULT_SCREEN_DPI);
+        ReleaseDC(nullptr, hdc);
     }
 
     *phIcon = (HICON)LoadImageW(
         g_hInst,
         MAKEINTRESOURCEW(idIcon),
         IMAGE_ICON,
-        0, 0,
-        LR_DEFAULTSIZE | LR_SHARED);
+        size, size,
+        LR_SHARED);
 
     return (*phIcon != nullptr) ? S_OK : E_FAIL;
 }
@@ -384,17 +441,40 @@ STDAPI CLangBarItemButton::GetText(BSTR* pbstrText)
     if (_pTextService != nullptr &&
         IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE))
     {
-        // ƒ‚[ƒhƒAƒCƒRƒ“‚ÌƒeƒLƒXƒg
-        InputMode mode = _pTextService->GetInputMode();
-        pszText = (mode == INPUTMODE_HIRAGANA) ? L"‚ " : L"A";
+        // ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ã®ãƒ†ã‚­ã‚¹ãƒˆ
+        InputMode mode = _pTextService->GetEffectiveInputMode();
+        switch (mode)
+        {
+        case InputMode::Hiragana:
+            pszText = L"ã‚";
+            break;
+        case InputMode::DirectInput:
+            pszText = L"A";
+            break;
+        case InputMode::FullwidthAlphanumeric:
+            pszText = L"ï¼¡";
+            break;
+        case InputMode::HalfwidthKatakana:
+            pszText = L"_ï½¶";
+            break;
+        case InputMode::FullwidthKatakana:
+            pszText = L"ã‚«";
+            break;
+        default:
+            pszText = L"A";
+            break;
+        }
     }
     else
     {
-        // ƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“ or TextService –¢Ú‘±
+        // ãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ or TextService æœªæŽ¥ç¶š
         pszText = LANGBAR_ITEM_DESC;
     }
 
     *pbstrText = SysAllocString(pszText);
+    DebugLog(L"[LanguageBar] GetText guid=%s text=%s\r\n",
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE) ? L"mode" : L"brand",
+        pszText);
     return (*pbstrText == nullptr) ? E_OUTOFMEMORY : S_OK;
 }
 
@@ -439,37 +519,17 @@ HRESULT CLangBarItemButton::_Update()
     if (_pTextService == nullptr)
         return E_FAIL;
 
-    VARIANT var;
-    VariantInit(&var);
-
-    // •¶ßƒ‚[ƒhi•K—v‚È‚¯‚ê‚Îíœ‰Âj
-    V_VT(&var) = VT_I4;
-    V_I4(&var) = TF_SENTENCEMODE_PHRASEPREDICT;
-    _pTextService->_SetCompartment(
-        GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
-
-    // •ÏŠ·ƒ‚[ƒhi‚Ð‚ç‚ª‚È / ENGj
-    if (!_pTextService->_IsKeyboardDisabled() && _pTextService->_IsKeyboardOpen())
-    {
-        InputMode mode = _pTextService->GetInputMode();
-
-        if (mode == INPUTMODE_HIRAGANA)
-        {
-            V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
-                TF_CONVERSIONMODE_FULLSHAPE |
-                TF_CONVERSIONMODE_ROMAN;
-        }
-        else
-        {
-            V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
-        }
-
-        _pTextService->_SetCompartment(
-            GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
-    }
+    DebugLog(L"[CLangBarItemButton::_Update] guid=%s user=%d effective=%d keyboardOpen=%s\r\n",
+        IsEqualGUID(_LangBarItemInfo.guidItem, GUID_LBI_INPUTMODE) ? L"mode" : L"brand",
+        static_cast<int>(_pTextService->GetUserInputMode()),
+        static_cast<int>(_pTextService->GetEffectiveInputMode()),
+        _pTextService->_IsKeyboardOpen() ? L"TRUE" : L"FALSE");
 
     if (_pLangBarItemSink == nullptr)
         return E_FAIL;
 
-    return _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_TEXT | TF_LBI_STATUS);
+    return _pLangBarItemSink->OnUpdate(TF_LBI_ICON | TF_LBI_STATUS);
 }
+
+
+
