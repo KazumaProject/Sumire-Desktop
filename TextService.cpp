@@ -17,6 +17,8 @@
 #include "EditSession.h"
 #include "LanguageBar.h"
 
+extern const GUID GUID_LBI_INPUTMODE;
+
 class CInputScopeUpdateEditSession : public CEditSessionBase
 {
 public:
@@ -81,6 +83,9 @@ CTextService::CTextService()
     // Initialize the numbers for ThreadMgrEventSink.
     //
     _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkOpenCloseCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkInputmodeConversionCookie = TF_INVALID_COOKIE;
 
     //
     // Initialize the numbers for TextEditSink.
@@ -119,6 +124,7 @@ CTextService::CTextService()
     // composition セッション段階を既定値に初期化
     //
     _compositionPhase = CompositionPhase::Idle;
+    _pendingInternalEdits = 0;
 
     _tfClientId = TF_CLIENTID_NULL;
 
@@ -137,6 +143,9 @@ CTextService::~CTextService()
 
     _pThreadMgr = NULL;
     _dwThreadMgrEventSinkCookie = TF_INVALID_COOKIE;
+    _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkOpenCloseCookie = TF_INVALID_COOKIE;
+    _dwCompartmentEventSinkInputmodeConversionCookie = TF_INVALID_COOKIE;
     _pTextEditSinkContext = NULL;
     _dwTextEditSinkCookie = TF_INVALID_COOKIE;
 
@@ -151,6 +160,7 @@ CTextService::~CTextService()
     _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
 
     _compositionPhase = CompositionPhase::Idle;
+    _pendingInternalEdits = 0;
     _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
@@ -178,6 +188,14 @@ STDAPI CTextService::QueryInterface(REFIID riid, void** ppvObj)
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
     {
         *ppvObj = (ITfThreadMgrEventSink*)this;
+    }
+    else if (IsEqualIID(riid, IID_ITfThreadFocusSink))
+    {
+        *ppvObj = (ITfThreadFocusSink*)this;
+    }
+    else if (IsEqualIID(riid, IID_ITfCompartmentEventSink))
+    {
+        *ppvObj = (ITfCompartmentEventSink*)this;
     }
     else if (IsEqualIID(riid, IID_ITfTextEditSink))
     {
@@ -257,6 +275,8 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
 {
     UNREFERENCED_PARAMETER(dwFlags);
 
+    DebugLog(L"[ActivateEx] start pThreadMgr=0x%p tfClientId=0x%08X\r\n", pThreadMgr, tfClientId);
+
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
@@ -264,7 +284,19 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     //
     // Initialize ThreadMgrEventSink.
     //
-    if (!_InitThreadMgrEventSink())
+    BOOL fThreadMgrEventSink = _InitThreadMgrEventSink();
+    DebugLogBool(L"[ActivateEx] _InitThreadMgrEventSink", fThreadMgrEventSink);
+    if (!fThreadMgrEventSink)
+        goto ExitError;
+
+    BOOL fThreadFocusSink = _InitThreadFocusSink();
+    DebugLogBool(L"[ActivateEx] _InitThreadFocusSink", fThreadFocusSink);
+    if (!fThreadFocusSink)
+        goto ExitError;
+
+    BOOL fCompartmentEventSink = _InitCompartmentEventSink();
+    DebugLogBool(L"[ActivateEx] _InitCompartmentEventSink", fCompartmentEventSink);
+    if (!fCompartmentEventSink)
         goto ExitError;
 
     //
@@ -282,19 +314,25 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     //
     // Initialize Language Bar.
     //
-    if (!_InitLanguageBar())
+    BOOL fLanguageBar = _InitLanguageBar();
+    DebugLogBool(L"[ActivateEx] _InitLanguageBar", fLanguageBar);
+    if (!fLanguageBar)
         goto ExitError;
 
     //
     // Initialize KeyEventSink
     //
-    if (!_InitKeyEventSink())
+    BOOL fKeyEventSink = _InitKeyEventSink();
+    DebugLogBool(L"[ActivateEx] _InitKeyEventSink", fKeyEventSink);
+    if (!fKeyEventSink)
         goto ExitError;
 
     //
     // Initialize PreservedKeys
     //
-    if (!_InitPreservedKey())
+    BOOL fPreservedKey = _InitPreservedKey();
+    DebugLogBool(L"[ActivateEx] _InitPreservedKey", fPreservedKey);
+    if (!fPreservedKey)
         goto ExitError;
 
     //
@@ -303,9 +341,11 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     if (!_InitDisplayAttributeGuidAtom())
         goto ExitError;
 
+    DebugLog(L"[ActivateEx] success\r\n");
     return S_OK;
 
 ExitError:
+    DebugLog(L"[ActivateEx] ExitError\r\n");
     Deactivate(); // cleanup any half-finished init
     return E_FAIL;
 }
@@ -333,6 +373,8 @@ STDAPI CTextService::Deactivate()
     //
     // Uninitialize ThreadMgrEventSink.
     //
+    _UninitCompartmentEventSink();
+    _UninitThreadFocusSink();
     _UninitThreadMgrEventSink();
 
     //
@@ -370,12 +412,20 @@ STDAPI CTextService::Deactivate()
 
 void CTextService::SetUserInputMode(InputMode mode)
 {
-    if (_inputModeState.GetUserInputMode() == mode)
+    InputMode oldMode = _inputModeState.GetUserInputMode();
+    if (oldMode == mode)
     {
+        DebugLog(L"[SetUserInputMode] old=%d new=%d no-op\r\n",
+            static_cast<int>(oldMode), static_cast<int>(mode));
         return;
     }
 
     _inputModeState.SetUserInputMode(mode);
+
+    DebugLog(L"[SetUserInputMode] old=%d new=%d effective=%d\r\n",
+        static_cast<int>(oldMode),
+        static_cast<int>(mode),
+        static_cast<int>(_inputModeState.GetEffectiveInputMode()));
     _UpdateLanguageBar();
 }
 
@@ -478,53 +528,70 @@ Exit:
 BOOL CTextService::_InitLanguageBar()
 {
     ITfLangBarItemMgr* pLangBarItemMgr;
-    BOOL fRet = FALSE;
+    BOOL fBrandAdded = FALSE;
+    HRESULT hr = S_OK;
+
+    DebugLog(L"[LanguageBar] _InitLanguageBar start\r\n");
 
     if (_pThreadMgr == NULL)
+    {
+        DebugLog(L"[LanguageBar] _InitLanguageBar threadMgr=null\r\n");
         return FALSE;
+    }
 
-    if (_pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
-        (void**)&pLangBarItemMgr) != S_OK)
+    hr = _pThreadMgr->QueryInterface(IID_ITfLangBarItemMgr,
+        (void**)&pLangBarItemMgr);
+    DebugLogHr(L"[LanguageBar] QueryInterface(ITfLangBarItemMgr)", hr);
+    if (hr != S_OK)
     {
         return FALSE;
     }
 
     // ブランドアイコン（独自 GUID）
     _pLangBarItemBrand = new CLangBarItemButton(this, c_guidLangBarItemButton);
+    DebugLog(L"[LanguageBar] brand item %s\r\n", _pLangBarItemBrand != NULL ? L"created" : L"null");
     if (_pLangBarItemBrand != NULL)
     {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemBrand) != S_OK)
+        hr = pLangBarItemMgr->AddItem(_pLangBarItemBrand);
+        DebugLogHr(L"[LanguageBar] brand AddItem", hr);
+        if (hr != S_OK)
         {
             _pLangBarItemBrand->Release();
             _pLangBarItemBrand = NULL;
         }
         else
         {
-            fRet = TRUE;
+            fBrandAdded = TRUE;
         }
     }
 
-    // ★ モードアイコン ⇒ GUID_LBI_INPUTMODE を使う ★
+    // モードアイコンは OS 標準の入力モード GUID で登録する
     _pLangBarItemMode = new CLangBarItemButton(this, GUID_LBI_INPUTMODE);
+    DebugLog(L"[LanguageBar] mode item %s\r\n", _pLangBarItemMode != NULL ? L"created" : L"null");
+    DebugLogGuid(L"[LanguageBar] mode item registration", GUID_LBI_INPUTMODE);
     if (_pLangBarItemMode != NULL)
     {
-        if (pLangBarItemMgr->AddItem(_pLangBarItemMode) != S_OK)
+        hr = pLangBarItemMgr->AddItem(_pLangBarItemMode);
+        DebugLogHr(L"[LanguageBar] mode AddItem", hr);
+        if (hr != S_OK)
         {
             _pLangBarItemMode->Release();
             _pLangBarItemMode = NULL;
-        }
-        else
-        {
-            fRet = TRUE;
         }
     }
 
     pLangBarItemMgr->Release();
 
+    // 初期状態はひらがな / キーボード ON に寄せる。
+    SetUserInputMode(InputMode::Hiragana);
+    _SetKeyboardOpen(TRUE);
+
     // 初期状態（ひらがな / キーボード ON）を TSF に通知
     _UpdateLanguageBar();
 
-    return fRet;
+    DebugLogBool(L"[LanguageBar] _InitLanguageBar brandAdded", fBrandAdded);
+    DebugLogBool(L"[LanguageBar] _InitLanguageBar return", TRUE);
+    return TRUE;
 }
 
 
@@ -572,6 +639,11 @@ void CTextService::_UninitLanguageBar()
 
 void CTextService::_UpdateLanguageBar()
 {
+    _UpdateLanguageBarCompartments();
+
+    DebugLog(L"[_UpdateLanguageBar] called brand=%s mode=%s\r\n",
+        _pLangBarItemBrand ? L"present" : L"null",
+        _pLangBarItemMode ? L"present" : L"null");
     if (_pLangBarItemBrand)
     {
         _pLangBarItemBrand->_Update();
@@ -582,6 +654,51 @@ void CTextService::_UpdateLanguageBar()
         _pLangBarItemMode->_Update();
     }
 }
+
+void CTextService::_UpdateLanguageBarCompartments()
+{
+    VARIANT var;
+    VariantInit(&var);
+
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = TF_SENTENCEMODE_PHRASEPREDICT;
+    _SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE, &var);
+
+    if (_IsKeyboardDisabled() || !_IsKeyboardOpen())
+    {
+        return;
+    }
+
+    InputMode mode = GetEffectiveInputMode();
+    switch (mode)
+    {
+    case InputMode::Hiragana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_FULLSHAPE |
+            TF_CONVERSIONMODE_ROMAN;
+        break;
+    case InputMode::FullwidthAlphanumeric:
+        V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC |
+            TF_CONVERSIONMODE_FULLSHAPE;
+        break;
+    case InputMode::HalfwidthKatakana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_KATAKANA;
+        break;
+    case InputMode::FullwidthKatakana:
+        V_I4(&var) = TF_CONVERSIONMODE_NATIVE |
+            TF_CONVERSIONMODE_KATAKANA |
+            TF_CONVERSIONMODE_FULLSHAPE;
+        break;
+    case InputMode::DirectInput:
+    default:
+        V_I4(&var) = TF_CONVERSIONMODE_ALPHANUMERIC;
+        break;
+    }
+
+    _SetCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &var);
+}
+
 
 void CTextService::_UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr)
 {
@@ -631,6 +748,11 @@ void CTextService::_ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie e
     }
 }
 
+void CTextService::_MarkInternalEdit()
+{
+    ++_pendingInternalEdits;
+}
+
 HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pContext)
 {
     if (_pComposition == NULL || pContext == NULL)
@@ -645,6 +767,7 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
     }
 
     const std::wstring& preedit = _compositionState.GetPreedit();
+    _MarkInternalEdit();
     HRESULT hr = pRangeComposition->SetText(ec, 0, preedit.c_str(), static_cast<ULONG>(preedit.size()));
     if (SUCCEEDED(hr))
     {
@@ -675,6 +798,40 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         }
 
         _SetCompositionDisplayAttributes(ec, pContext, gaDisplayAttribute);
+    }
+
+    pRangeComposition->Release();
+    return hr;
+}
+
+HRESULT CTextService::_ClearCompositionText(TfEditCookie ec, ITfContext* pContext)
+{
+    if (_pComposition == NULL || pContext == NULL)
+    {
+        return E_FAIL;
+    }
+
+    ITfRange* pRangeComposition = NULL;
+    if (_pComposition->GetRange(&pRangeComposition) != S_OK || pRangeComposition == NULL)
+    {
+        return E_FAIL;
+    }
+
+    _MarkInternalEdit();
+    HRESULT hr = pRangeComposition->SetText(ec, 0, L"", 0);
+    if (SUCCEEDED(hr))
+    {
+        TF_SELECTION tfSelection = {};
+        ITfRange* pSelectionRange = NULL;
+        if (pRangeComposition->Clone(&pSelectionRange) == S_OK && pSelectionRange != NULL)
+        {
+            pSelectionRange->Collapse(ec, TF_ANCHOR_START);
+            tfSelection.range = pSelectionRange;
+            tfSelection.style.ase = TF_AE_NONE;
+            tfSelection.style.fInterimChar = FALSE;
+            pContext->SetSelection(ec, 1, &tfSelection);
+            pSelectionRange->Release();
+        }
     }
 
     pRangeComposition->Release();

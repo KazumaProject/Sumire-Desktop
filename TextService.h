@@ -27,6 +27,8 @@ class CCandidateList;
 
 class CTextService : public ITfTextInputProcessorEx,
     public ITfThreadMgrEventSink,
+    public ITfThreadFocusSink,
+    public ITfCompartmentEventSink,
     public ITfTextEditSink,
     public ITfKeyEventSink,
     public ITfCompositionSink,
@@ -54,6 +56,9 @@ public:
     STDMETHODIMP OnSetFocus(ITfDocumentMgr* pDocMgrFocus, ITfDocumentMgr* pDocMgrPrevFocus);
     STDMETHODIMP OnPushContext(ITfContext* pContext);
     STDMETHODIMP OnPopContext(ITfContext* pContext);
+    STDMETHODIMP OnSetThreadFocus();
+    STDMETHODIMP OnKillThreadFocus();
+    STDMETHODIMP OnChange(REFGUID rguid);
 
     // ITfTextEditSink
     STDMETHODIMP OnEndEdit(ITfContext* pContext, TfEditCookie ecReadOnly, ITfEditRecord* pEditRecord);
@@ -98,6 +103,7 @@ public:
     BOOL _IsComposing();
     void _SetComposition(ITfComposition* pComposition);
     HRESULT _UpdateCompositionText(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _ClearCompositionText(TfEditCookie ec, ITfContext* pContext);
     void _ResetCompositionState();
 
     // key event handlers.
@@ -108,6 +114,7 @@ public:
     HRESULT _HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleDeleteKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleEscapeKey(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _HandleModeToggleKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectNextCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectFirstCandidate(TfEditCookie ec, ITfContext* pContext);
@@ -153,11 +160,16 @@ public:
     // InputScope 評価用の内部ヘルパー。
     // TSF の read edit session から呼ばれるため public に公開する。
     void _ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie ec);
+    void _MarkInternalEdit();
 
 private:
     // initialize and uninitialize ThreadMgrEventSink.
     BOOL _InitThreadMgrEventSink();
     void _UninitThreadMgrEventSink();
+    BOOL _InitThreadFocusSink();
+    void _UninitThreadFocusSink();
+    BOOL _InitCompartmentEventSink();
+    void _UninitCompartmentEventSink();
 
     // initialize TextEditSink.
     BOOL _InitTextEditSink(ITfDocumentMgr* pDocMgr);
@@ -166,6 +178,7 @@ private:
     BOOL _InitLanguageBar();
     void _UninitLanguageBar();
     void _UpdateLanguageBar();
+    void _UpdateLanguageBarCompartments();
 
     // initialize and uninitialize KeyEventSink.
     BOOL _InitKeyEventSink();
@@ -178,6 +191,8 @@ private:
     // utility function for KeyEventSink
     BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam);
     void _UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr);
+    void _KeyboardOpenCloseChanged();
+    void _KeyboardInputConversionChanged();
 
     //
     // state
@@ -187,6 +202,9 @@ private:
 
     // The cookie of ThreadMgrEventSink
     DWORD _dwThreadMgrEventSinkCookie;
+    DWORD _dwThreadFocusSinkCookie;
+    DWORD _dwCompartmentEventSinkOpenCloseCookie;
+    DWORD _dwCompartmentEventSinkInputmodeConversionCookie;
 
     //
     // private variables for TextEditSink
@@ -217,6 +235,7 @@ private:
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;
+    LONG _pendingInternalEdits;
 
     LONG _cRef;     // COM ref count
 };

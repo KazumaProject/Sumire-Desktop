@@ -81,6 +81,7 @@ STDAPI CStartCompositionEditSession::DoEditSession(TfEditCookie ec)
         tfSelection.range = pRangeInsert;
         tfSelection.style.ase = TF_AE_NONE;
         tfSelection.style.fInterimChar = FALSE;
+        _pTextService->_MarkInternalEdit();
         _pContext->SetSelection(ec, 1, &tfSelection);
     }
 

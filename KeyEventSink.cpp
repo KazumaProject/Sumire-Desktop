@@ -62,30 +62,44 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
 {
     // 1. キーボードが無効なら何も食べない
     if (_IsKeyboardDisabled())
+    {
+        if (wParam == VK_F12)
+        {
+            DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=FALSE reason=keyboard_disabled\r\n");
+        }
         return FALSE;
-
-    // 2. IME OFF なら食べない
-    if (!_IsKeyboardOpen())
-        return FALSE;
+    }
 
     //
-    // 3. 候補ウィンドウ表示中は、キー処理を CandidateList 側に任せる
+    // 2. 入力モード共通で扱いたいキー
+    //    - F12: IME 内部の「あ／ENG」モード切替用
+    //      → KeyHandler（CKeyHandlerEditSession）に処理させるため IME が食う
+    //
+    if (wParam == VK_F12)
+    {
+        DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=TRUE\r\n");
+        return TRUE;
+    }
+
+    //
+    // 3. IME OFF なら食べない
+    if (!_IsKeyboardOpen())
+    {
+        if (wParam == VK_F12)
+        {
+            DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=FALSE reason=keyboard_closed\r\n");
+        }
+        return FALSE;
+    }
+
+    //
+    // 4. 候補ウィンドウ表示中は、キー処理を CandidateList 側に任せる
     //    （元サンプルと同じ挙動）
     //
     if (_pCandidateList &&
         _pCandidateList->_IsContextCandidateWindow(pContext))
     {
         return FALSE;
-    }
-
-    //
-    // 4. 入力モード共通で扱いたいキー
-    //    - F12: IME 内部の「あ／ENG」モード切替用
-    //      → KeyHandler（CKeyHandlerEditSession）に処理させるため IME が食う
-    //
-    if (wParam == VK_F12)
-    {
-        return TRUE;
     }
 
     //
@@ -157,6 +171,10 @@ STDAPI CTextService::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM l
         return E_INVALIDARG;
 
     *pfEaten = _IsKeyEaten(pContext, wParam);
+    if (wParam == VK_F12)
+    {
+        DebugLog(L"[OnTestKeyDown] wParam=VK_F12 pfEaten=%s\r\n", *pfEaten ? L"TRUE" : L"FALSE");
+    }
     return S_OK;
 }
 
@@ -176,6 +194,10 @@ STDAPI CTextService::OnKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lPara
         return E_INVALIDARG;
 
     *pfEaten = _IsKeyEaten(pContext, wParam);
+    if (wParam == VK_F12)
+    {
+        DebugLog(L"[OnKeyDown] wParam=VK_F12 pfEaten=%s\r\n", *pfEaten ? L"TRUE" : L"FALSE");
+    }
 
     if (*pfEaten)
     {
@@ -239,6 +261,9 @@ STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* p
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
+    DebugLog(L"[KeyEventSink] OnPreservedKey entered\r\n");
+    DebugLogGuid(L"[KeyEventSink] OnPreservedKey rguid", rguid);
+
     if (IsEqualGUID(rguid, GUID_PRESERVEDKEY_ONOFF))
     {
         BOOL fOpen = _IsKeyboardOpen();
@@ -266,15 +291,22 @@ STDAPI CTextService::OnPreservedKey(ITfContext* pContext, REFGUID rguid, BOOL* p
 BOOL CTextService::_InitKeyEventSink()
 {
     ITfKeystrokeMgr* pKeystrokeMgr;
-    HRESULT hr;
+    HRESULT hr = E_FAIL;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    hr = _pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr);
+    DebugLogHr(L"[KeyEventSink] QueryInterface(ITfKeystrokeMgr)", hr);
+    if (hr != S_OK)
+    {
+        DebugLogBool(L"[KeyEventSink] _InitKeyEventSink", FALSE);
         return FALSE;
+    }
 
     hr = pKeystrokeMgr->AdviseKeyEventSink(_tfClientId, (ITfKeyEventSink*)this, TRUE);
+    DebugLogHr(L"[KeyEventSink] AdviseKeyEventSink", hr);
 
     pKeystrokeMgr->Release();
 
+    DebugLogBool(L"[KeyEventSink] _InitKeyEventSink", (hr == S_OK));
     return (hr == S_OK);
 }
 
@@ -307,10 +339,15 @@ void CTextService::_UninitKeyEventSink()
 BOOL CTextService::_InitPreservedKey()
 {
     ITfKeystrokeMgr* pKeystrokeMgr;
-    HRESULT hr;
+    HRESULT hr = E_FAIL;
 
-    if (_pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr) != S_OK)
+    hr = _pThreadMgr->QueryInterface(IID_ITfKeystrokeMgr, (void**)&pKeystrokeMgr);
+    DebugLogHr(L"[KeyEventSink] QueryInterface(ITfKeystrokeMgr) for preserved", hr);
+    if (hr != S_OK)
+    {
+        DebugLogBool(L"[KeyEventSink] _InitPreservedKey", FALSE);
         return FALSE;
+    }
 
     // register Alt+~ key
     hr = pKeystrokeMgr->PreserveKey(_tfClientId,
@@ -318,6 +355,7 @@ BOOL CTextService::_InitPreservedKey()
         &c_pkeyOnOff0,
         c_szPKeyOnOff,
         lstrlen(c_szPKeyOnOff));
+    DebugLogHr(L"[KeyEventSink] PreserveKey Alt+~", hr);
 
     // register KANJI key
     hr = pKeystrokeMgr->PreserveKey(_tfClientId,
@@ -325,6 +363,7 @@ BOOL CTextService::_InitPreservedKey()
         &c_pkeyOnOff1,
         c_szPKeyOnOff,
         lstrlen(c_szPKeyOnOff));
+    DebugLogHr(L"[KeyEventSink] PreserveKey KANJI", hr);
 
     // register F6 key (サンプルのまま登録しておく。必要なら後で利用可能)
     hr = pKeystrokeMgr->PreserveKey(_tfClientId,
@@ -332,9 +371,11 @@ BOOL CTextService::_InitPreservedKey()
         &c_pkeyF6,
         c_szPKeyF6,
         lstrlen(c_szPKeyF6));
+    DebugLogHr(L"[KeyEventSink] PreserveKey F6", hr);
 
     pKeystrokeMgr->Release();
 
+    DebugLogBool(L"[KeyEventSink] _InitPreservedKey", (hr == S_OK));
     return (hr == S_OK);
 }
 

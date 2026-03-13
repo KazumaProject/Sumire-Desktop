@@ -156,6 +156,7 @@
   <ItemGroup>
     <ClCompile Include="CandidateList.cpp" />
     <ClCompile Include="CandidateWindow.cpp" />
+    <ClCompile Include="CompartmentEventSink.cpp" />
     <ClCompile Include="Compartment.cpp" />
     <ClCompile Include="Composition.cpp" />
     <ClCompile Include="CompositionState.cpp" />
@@ -180,6 +181,7 @@
     <ClCompile Include="TextEditSink.cpp" />
     <ClCompile Include="TextService.cpp" />
     <ClCompile Include="ThreadMgrEventSink.cpp" />
+    <ClCompile Include="ThreadFocusSink.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CandidateList.h" />

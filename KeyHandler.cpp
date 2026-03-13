@@ -69,6 +69,10 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     case VK_ESCAPE:
         return _pTextService->_HandleEscapeKey(ec, _pContext);
 
+    case VK_F12:
+        DebugLog(L"[KeyHandler] F12 path entered\r\n");
+        return _pTextService->_HandleModeToggleKey(ec, _pContext);
+
     default:
         if ((_wParam >= 'A' && _wParam <= 'Z') ||
             (_wParam >= '0' && _wParam <= '9'))
@@ -321,6 +325,7 @@ HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
 
     if (_compositionState.Empty())
     {
+        _ClearCompositionText(ec, pContext);
         _TerminateComposition(ec, pContext);
         return S_OK;
     }
@@ -350,6 +355,7 @@ HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
 
     if (_compositionState.Empty())
     {
+        _ClearCompositionText(ec, pContext);
         _TerminateComposition(ec, pContext);
         return S_OK;
     }
@@ -369,6 +375,23 @@ HRESULT CTextService::_HandleEscapeKey(TfEditCookie ec, ITfContext* pContext)
     HRESULT hr = _CancelConversion(ec, pContext);
     _CloseCandidateList();
     return hr;
+}
+
+HRESULT CTextService::_HandleModeToggleKey(TfEditCookie ec, ITfContext* pContext)
+{
+    UNREFERENCED_PARAMETER(ec);
+    UNREFERENCED_PARAMETER(pContext);
+
+    DebugLog(L"[KeyHandler] F12 toggle executed before user=%d effective=%d\r\n",
+        static_cast<int>(GetUserInputMode()),
+        static_cast<int>(GetEffectiveInputMode()));
+    ToggleInputMode();
+    _SetKeyboardOpen(TRUE);
+    _UpdateLanguageBar();
+    DebugLog(L"[KeyHandler] F12 toggle executed after user=%d effective=%d\r\n",
+        static_cast<int>(GetUserInputMode()),
+        static_cast<int>(GetEffectiveInputMode()));
+    return S_OK;
 }
 
 

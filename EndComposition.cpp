@@ -49,11 +49,17 @@ void CTextService::_TerminateComposition(TfEditCookie ec, ITfContext *pContext)
 {
     if (_pComposition != NULL)
     {
+        if (_compositionState.Empty())
+        {
+            _ClearCompositionText(ec, pContext);
+        }
+
         //
         // remove the display attribute from the composition range.
         //
         _ClearCompositionDisplayAttributes(ec, pContext);
 
+        _MarkInternalEdit();
         _pComposition->EndComposition(ec);
         _pComposition->Release();
         _pComposition = NULL;

@@ -1,4 +1,4 @@
-//////////////////////////////////////////////////////////////////////
+ï»¿//////////////////////////////////////////////////////////////////////
 //
 //  THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //  ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -19,20 +19,25 @@
 #include <olectl.h>
 #include <strsafe.h>
 #include <assert.h>
+#include <stdarg.h>
 #include <msctf.h>
 
 void DllAddRef();
 void DllRelease();
+void DebugLog(const WCHAR* format, ...);
+void DebugLogHr(const WCHAR* scope, HRESULT hr);
+void DebugLogBool(const WCHAR* scope, BOOL value);
+void DebugLogGuid(const WCHAR* scope, REFGUID guid);
 
 #define TEXTSERVICE_LANGID      MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT)
 
 #define TEXTSERVICE_DESC        TEXT("Sumire IME")
 #define TEXTSERVICE_MODEL       TEXT("Apartment")
 
-// TextService ‚ÌŠù’èƒAƒCƒRƒ“iƒŒƒWƒXƒgƒŠ“o˜^‚Åg‚¤j
+// TextService ã®æ—¢å®šã‚¢ã‚¤ã‚³ãƒ³ï¼ˆãƒ¬ã‚¸ã‚¹ãƒˆãƒªç™»éŒ²ã§ä½¿ã†ï¼‰
 #define TEXTSERVICE_ICON_INDEX  0
 
-// LangBar ‚Ìà–¾ƒeƒLƒXƒg
+// LangBar ã®èª¬æ˜ãƒ†ã‚­ã‚¹ãƒˆ
 #define LANGBAR_ITEM_DESC       L"Sumire Text Service Button"
 
 extern HINSTANCE g_hInst;
@@ -41,21 +46,17 @@ extern CRITICAL_SECTION g_cs;
 
 extern const CLSID c_clsidTextService;
 extern const GUID  c_guidProfile;
+extern const GUID  GUID_LBI_INPUTMODE;
 
-// LangBar ƒ{ƒ^ƒ“—p GUID
-//   c_guidLangBarItemButton      : ƒuƒ‰ƒ“ƒhƒAƒCƒRƒ“—pi“Æ© GUIDj
-//   c_guidLangBarItemButtonMode  : IME ƒ‚[ƒhƒAƒCƒRƒ“—pi“Æ© GUIDj
+// LangBar ãƒœã‚¿ãƒ³ç”¨ GUID
+//   c_guidLangBarItemButton      : ãƒ–ãƒ©ãƒ³ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ç”¨ï¼ˆç‹¬è‡ª GUIDï¼‰
+//   c_guidLangBarItemButtonMode  : IME ãƒ¢ãƒ¼ãƒ‰ã‚¢ã‚¤ã‚³ãƒ³ç”¨ï¼ˆç‹¬è‡ª GUIDï¼‰
 extern const GUID c_guidLangBarItemButton;
+extern const GUID c_guidLangBarItemButtonMode;
 
 // Display Attribute GUID
 extern const GUID c_guidDisplayAttributeInput;
 extern const GUID c_guidDisplayAttributeConverted;
 
-// ˆê•” SDK ‚Å‚Í GUID_LBI_INPUTMODE ‚ªƒwƒbƒ_‚ÉéŒ¾‚³‚ê‚Ä‚¢‚È‚¢ê‡‚ª‚ ‚é‚Ì‚ÅA
-// uéŒ¾‚¾‚¯v©‘O‚Å’Ç‰Á‚·‚éB
-// À‘Ì‚Í uuid.lib(msctf_g.obj) ‘¤‚É‚ ‚é‚Ì‚ÅA‚±‚±‚Å‚Í’è‹`‚µ‚È‚¢‚±‚Æ‚ªd—vB
-#ifndef GUID_LBI_INPUTMODE
-EXTERN_C const GUID GUID_LBI_INPUTMODE;
-#endif
-
 #endif // GLOBALS_H
+
