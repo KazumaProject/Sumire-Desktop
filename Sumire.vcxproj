@@ -218,6 +218,9 @@
   <ItemGroup>
     <ResourceCompile Include="TextService.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="romaji-hiragana.tsv" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
