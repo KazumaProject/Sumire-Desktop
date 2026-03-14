@@ -108,6 +108,7 @@ public:
 
     // key event handlers.
     HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    HRESULT _HandleShiftKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
@@ -165,6 +166,7 @@ public:
     // TSF の read edit session から呼ばれるため public に公開する。
     void _ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie ec);
     void _MarkInternalEdit();
+    InputMode _GetCompositionInputMode() const;
 
 private:
     // initialize and uninitialize ThreadMgrEventSink.
@@ -238,6 +240,7 @@ private:
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
+    BOOL _pendingAlphabeticShift;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;

@@ -110,6 +110,8 @@ public:
         const RomajiKanaConverter& converter,
         bool enabled);
     bool HasLiveConversionPreview() const;
+    void SetAlphabeticPreeditActive(bool active);
+    bool IsAlphabeticPreeditActive() const;
 
     const std::vector<std::wstring>& GetCandidates() const;
     const std::vector<ConversionCandidate>& GetConversionCandidates() const;
@@ -180,6 +182,8 @@ private:
     std::wstring _liveConversionText;
     LONG _liveConversionCursor;
     std::vector<ConversionCandidate> _liveConversionCandidates;
+    std::wstring _liveConversionReadingCache;
+    bool _alphabeticPreeditActive;
     LONG _rawCursor;
     LONG _caretPosition;
     LONG _preeditCursor;

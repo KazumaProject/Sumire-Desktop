@@ -61,6 +61,9 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     case VK_RETURN:
         return _pTextService->_HandleReturnKey(ec, _pContext);
 
+    case VK_SHIFT:
+        return _pTextService->_HandleShiftKey(ec, _pContext);
+
     case VK_SPACE:
         return _pTextService->_HandleSpaceKey(ec, _pContext);
 
@@ -209,19 +212,64 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
         return E_FAIL;
     }
 
-    InputMode mode = GetEffectiveInputMode();
+    InputMode mode = _GetCompositionInputMode();
     WCHAR rawChar = 0;
     if (!TryTranslateVirtualKeyToChar(wParam, lParam, &rawChar))
     {
+        _pendingAlphabeticShift = FALSE;
         return S_FALSE;
     }
 
+    const bool alphabeticChar = (rawChar >= L'A' && rawChar <= L'Z') || (rawChar >= L'a' && rawChar <= L'z');
+    if (_pendingAlphabeticShift &&
+        GetEffectiveInputMode() == InputMode::Hiragana &&
+        alphabeticChar)
+    {
+        _compositionState.SetAlphabeticPreeditActive(true);
+        mode = InputMode::DirectInput;
+    }
+    else if (_pendingAlphabeticShift)
+    {
+        _pendingAlphabeticShift = FALSE;
+    }
+
     WCHAR ch = NormalizeRawInputChar(rawChar, mode);
+    if (_compositionState.IsAlphabeticPreeditActive())
+    {
+        if (alphabeticChar)
+        {
+            ch = _compositionState.GetRawInput().empty()
+                ? static_cast<WCHAR>(towupper(rawChar))
+                : static_cast<WCHAR>(towlower(rawChar));
+        }
+        else
+        {
+            ch = rawChar;
+        }
+    }
 
     _compositionState.Begin();
     _compositionState.InsertRawChar(ch, mode, _romajiConverter);
+    _pendingAlphabeticShift = FALSE;
     _compositionPhase = _compositionState.GetPhase();
     return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_HandleShiftKey(TfEditCookie ec, ITfContext* pContext)
+{
+    UNREFERENCED_PARAMETER(ec);
+    UNREFERENCED_PARAMETER(pContext);
+
+    if (GetEffectiveInputMode() == InputMode::Hiragana &&
+        _compositionState.GetPhase() != CompositionPhase::Converting &&
+        _compositionState.GetPhase() != CompositionPhase::CandidateSelecting &&
+        _compositionState.GetPhase() != CompositionPhase::RechunkSelecting)
+    {
+        _pendingAlphabeticShift = TRUE;
+        return S_OK;
+    }
+
+    return S_FALSE;
 }
 
 //+---------------------------------------------------------------------------
@@ -232,6 +280,7 @@ HRESULT CTextService::_HandleCharacterKey(TfEditCookie ec, ITfContext* pContext,
 
 HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 {
+    _pendingAlphabeticShift = FALSE;
     CompositionPhase phase = _compositionState.GetPhase();
     if (phase == CompositionPhase::Idle)
     {
@@ -257,6 +306,7 @@ HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 {
+    _pendingAlphabeticShift = FALSE;
     CompositionPhase phase = _compositionState.GetPhase();
     if (phase == CompositionPhase::Idle)
     {
@@ -302,9 +352,27 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
         return _ShowCandidateList(ec, pContext);
     }
 
-    if (!_compositionState.StartConversion(_kanaKanjiConverter, GetEffectiveInputMode(), _romajiConverter))
+    if (!_compositionState.StartConversion(_kanaKanjiConverter, _GetCompositionInputMode(), _romajiConverter))
     {
         return S_OK;
+    }
+
+    if (_compositionState.IsAlphabeticPreeditActive() || _liveConversionEnabled != FALSE)
+    {
+        if (!_compositionState.BeginSegmentSelection())
+        {
+            _compositionPhase = _compositionState.GetPhase();
+            return _UpdateCompositionText(ec, pContext);
+        }
+
+        _compositionPhase = _compositionState.GetPhase();
+        HRESULT hr = _UpdateCompositionText(ec, pContext);
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+
+        return _ShowCandidateList(ec, pContext);
     }
 
     _compositionPhase = _compositionState.GetPhase();
@@ -321,6 +389,7 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
 {
+    _pendingAlphabeticShift = FALSE;
     if (!_IsComposing() || _pComposition == NULL)
     {
         return S_FALSE;
@@ -346,7 +415,7 @@ HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPA
         return S_OK;
     }
 
-    InputMode mode = GetEffectiveInputMode();
+    InputMode mode = _GetCompositionInputMode();
 
     if (wParam == VK_LEFT)
     {
@@ -392,6 +461,7 @@ Exit:
 
 HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
 {
+    _pendingAlphabeticShift = FALSE;
     if (!_IsComposing() || _pComposition == nullptr)
     {
         return S_FALSE;
@@ -404,7 +474,7 @@ HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
         return _CancelConversion(ec, pContext);
     }
 
-    InputMode mode = GetEffectiveInputMode();
+    InputMode mode = _GetCompositionInputMode();
     if (!_compositionState.Backspace(mode, _romajiConverter))
     {
         return S_OK;
@@ -423,6 +493,7 @@ HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
 {
+    _pendingAlphabeticShift = FALSE;
     if (!_IsComposing() || _pComposition == nullptr)
     {
         return S_FALSE;
@@ -435,7 +506,7 @@ HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
         return _CancelConversion(ec, pContext);
     }
 
-    InputMode mode = GetEffectiveInputMode();
+    InputMode mode = _GetCompositionInputMode();
     if (!_compositionState.Delete(mode, _romajiConverter))
     {
         return S_OK;
@@ -454,6 +525,7 @@ HRESULT CTextService::_HandleDeleteKey(TfEditCookie ec, ITfContext* pContext)
 
 HRESULT CTextService::_HandleEscapeKey(TfEditCookie ec, ITfContext* pContext)
 {
+    _pendingAlphabeticShift = FALSE;
     if (_compositionState.GetPhase() == CompositionPhase::RechunkSelecting)
     {
         if (!_compositionState.CancelRechunkSelection())

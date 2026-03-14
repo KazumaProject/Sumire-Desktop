@@ -126,6 +126,7 @@ CTextService::CTextService()
     //
     _compositionPhase = CompositionPhase::Idle;
     _liveConversionEnabled = TRUE;
+    _pendingAlphabeticShift = FALSE;
     _pendingInternalEdits = 0;
 
     _tfClientId = TF_CLIENTID_NULL;
@@ -480,6 +481,16 @@ void CTextService::SetLiveConversionEnabled(BOOL enabled)
 BOOL CTextService::IsLiveConversionEnabled() const
 {
     return _liveConversionEnabled;
+}
+
+InputMode CTextService::_GetCompositionInputMode() const
+{
+    if (_compositionState.IsAlphabeticPreeditActive())
+    {
+        return InputMode::DirectInput;
+    }
+
+    return GetEffectiveInputMode();
 }
 
 
@@ -932,6 +943,7 @@ void CTextService::_ResetCompositionState()
     _compositionState.Reset();
     _composingText.Reset();
     _compositionPhase = CompositionPhase::Idle;
+    _pendingAlphabeticShift = FALSE;
 }
 
 HRESULT CTextService::_SelectNextCandidate(TfEditCookie ec, ITfContext* pContext)
@@ -1067,7 +1079,7 @@ HRESULT CTextService::_CancelConversion(TfEditCookie ec, ITfContext* pContext)
         return _UpdateCompositionText(ec, pContext);
     }
 
-    _compositionState.CancelConversion(GetEffectiveInputMode(), _romajiConverter);
+    _compositionState.CancelConversion(_GetCompositionInputMode(), _romajiConverter);
     _compositionPhase = _compositionState.GetPhase();
 
     if (_compositionPhase == CompositionPhase::Idle)
