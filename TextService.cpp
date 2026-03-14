@@ -19,6 +19,31 @@
 
 extern const GUID GUID_LBI_INPUTMODE;
 
+namespace
+{
+constexpr UINT WM_SUMIRE_LIVE_CONVERSION_READY = WM_APP + 0x120;
+const wchar_t kLiveConversionWindowClassName[] = L"SumireLiveConversionWindow";
+
+LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_NCCREATE)
+    {
+        const CREATESTRUCTW* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+        return TRUE;
+    }
+
+    CTextService* textService = reinterpret_cast<CTextService*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (message == WM_SUMIRE_LIVE_CONVERSION_READY && textService != nullptr)
+    {
+        textService->_ApplyCompletedLiveConversionPreview();
+        return 0;
+    }
+
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+}
+
 class CInputScopeUpdateEditSession : public CEditSessionBase
 {
 public:
@@ -31,6 +56,20 @@ public:
     {
         _pTextService->_ApplyInputScopeOverride(_pContext, ec);
         return S_OK;
+    }
+};
+
+class CLiveConversionRefreshEditSession : public CEditSessionBase
+{
+public:
+    CLiveConversionRefreshEditSession(CTextService* pTextService, ITfContext* pContext)
+        : CEditSessionBase(pTextService, pContext)
+    {
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec)
+    {
+        return _pTextService->_UpdateCompositionText(ec, _pContext);
     }
 };
 
@@ -127,6 +166,11 @@ CTextService::CTextService()
     _compositionPhase = CompositionPhase::Idle;
     _liveConversionEnabled = TRUE;
     _pendingAlphabeticShift = FALSE;
+    _liveConversionWindow = NULL;
+    _liveConversionWorkerRunning = false;
+    _liveConversionHasPendingRequest = false;
+    _liveConversionLatestRequestedVersion = 0;
+    _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
 
     _tfClientId = TF_CLIENTID_NULL;
@@ -164,6 +208,11 @@ CTextService::~CTextService()
     _gaDisplayAttributeFocusedConverted = TF_INVALID_GUIDATOM;
 
     _compositionPhase = CompositionPhase::Idle;
+    _liveConversionWindow = NULL;
+    _liveConversionWorkerRunning = false;
+    _liveConversionHasPendingRequest = false;
+    _liveConversionLatestRequestedVersion = 0;
+    _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
     _tfClientId = TF_CLIENTID_NULL;
 
@@ -345,6 +394,9 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     if (!_InitDisplayAttributeGuidAtom())
         goto ExitError;
 
+    if (!_InitLiveConversionAsync())
+        goto ExitError;
+
     DebugLog(L"[ActivateEx] success\r\n");
     return S_OK;
 
@@ -362,6 +414,8 @@ ExitError:
 
 STDAPI CTextService::Deactivate()
 {
+    _UninitLiveConversionAsync();
+
     // delete the candidate list object if it exists.
     if (_pCandidateList != NULL)
     {
@@ -491,6 +545,179 @@ InputMode CTextService::_GetCompositionInputMode() const
     }
 
     return GetEffectiveInputMode();
+}
+
+BOOL CTextService::_InitLiveConversionAsync()
+{
+    if (_liveConversionWindow != NULL)
+    {
+        return TRUE;
+    }
+
+    WNDCLASSW windowClass = {};
+    windowClass.lpfnWndProc = LiveConversionWindowProc;
+    windowClass.hInstance = g_hInst;
+    windowClass.lpszClassName = kLiveConversionWindowClassName;
+    RegisterClassW(&windowClass);
+
+    _liveConversionWindow = CreateWindowExW(
+        0,
+        kLiveConversionWindowClassName,
+        L"",
+        0,
+        0, 0, 0, 0,
+        HWND_MESSAGE,
+        NULL,
+        g_hInst,
+        this);
+    if (_liveConversionWindow == NULL)
+    {
+        return FALSE;
+    }
+
+    _liveConversionWorkerRunning = true;
+    _liveConversionWorker = std::thread([this]()
+    {
+        for (;;)
+        {
+            std::wstring reading;
+            std::uint64_t version = 0;
+            {
+                std::unique_lock<std::mutex> lock(_liveConversionMutex);
+                _liveConversionCv.wait(lock, [this]()
+                {
+                    return !_liveConversionWorkerRunning || _liveConversionHasPendingRequest;
+                });
+
+                if (!_liveConversionWorkerRunning)
+                {
+                    break;
+                }
+
+                reading = _liveConversionPendingReading;
+                version = _liveConversionLatestRequestedVersion;
+                _liveConversionHasPendingRequest = false;
+            }
+
+            ConversionResult result = _kanaKanjiConverter.Convert(reading);
+
+            bool shouldNotify = false;
+            {
+                std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                if (!_liveConversionWorkerRunning)
+                {
+                    break;
+                }
+
+                if (version != _liveConversionLatestRequestedVersion ||
+                    reading != _liveConversionLatestRequestedReading)
+                {
+                    continue;
+                }
+
+                _liveConversionCompletedReading = reading;
+                _liveConversionCompletedCandidates = std::move(result.candidates);
+                _liveConversionCompletedVersion = version;
+                shouldNotify = true;
+            }
+
+            if (shouldNotify && _liveConversionWindow != NULL)
+            {
+                PostMessageW(_liveConversionWindow, WM_SUMIRE_LIVE_CONVERSION_READY, 0, 0);
+            }
+        }
+    });
+
+    return TRUE;
+}
+
+void CTextService::_UninitLiveConversionAsync()
+{
+    {
+        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+        _liveConversionWorkerRunning = false;
+        _liveConversionHasPendingRequest = false;
+        _liveConversionPendingReading.clear();
+        _liveConversionLatestRequestedReading.clear();
+        _liveConversionCompletedReading.clear();
+        _liveConversionCompletedCandidates.clear();
+    }
+    _liveConversionCv.notify_all();
+
+    if (_liveConversionWorker.joinable())
+    {
+        _liveConversionWorker.join();
+    }
+
+    if (_liveConversionWindow != NULL)
+    {
+        DestroyWindow(_liveConversionWindow);
+        _liveConversionWindow = NULL;
+    }
+}
+
+void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
+{
+    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+    if (!_liveConversionWorkerRunning)
+    {
+        return;
+    }
+
+    if (reading == _liveConversionLatestRequestedReading)
+    {
+        return;
+    }
+
+    ++_liveConversionLatestRequestedVersion;
+    _liveConversionLatestRequestedReading = reading;
+    _liveConversionPendingReading = reading;
+    _liveConversionHasPendingRequest = true;
+    _liveConversionCv.notify_one();
+}
+
+void CTextService::_CancelLiveConversionRequests()
+{
+    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+    ++_liveConversionLatestRequestedVersion;
+    _liveConversionLatestRequestedReading.clear();
+    _liveConversionPendingReading.clear();
+    _liveConversionHasPendingRequest = false;
+    _liveConversionCompletedReading.clear();
+    _liveConversionCompletedCandidates.clear();
+    _liveConversionCompletedVersion = 0;
+}
+
+bool CTextService::_CanUseLiveConversionPreview() const
+{
+    return _liveConversionEnabled != FALSE &&
+        _compositionState.GetPhase() == CompositionPhase::Composing &&
+        !_compositionState.Empty() &&
+        !_compositionState.IsAlphabeticPreeditActive() &&
+        GetEffectiveInputMode() == InputMode::Hiragana;
+}
+
+void CTextService::_ApplyCompletedLiveConversionPreview()
+{
+    if (_pTextEditSinkContext == NULL || !_IsComposing())
+    {
+        return;
+    }
+
+    CLiveConversionRefreshEditSession* editSession =
+        new CLiveConversionRefreshEditSession(this, _pTextEditSinkContext);
+    if (editSession == NULL)
+    {
+        return;
+    }
+
+    HRESULT hr = E_FAIL;
+    _pTextEditSinkContext->RequestEditSession(
+        _tfClientId,
+        editSession,
+        TF_ES_ASYNCDONTCARE | TF_ES_READWRITE,
+        &hr);
+    editSession->Release();
 }
 
 
@@ -840,11 +1067,38 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         return E_FAIL;
     }
 
-    _compositionState.RefreshLiveConversionPreview(
-        _kanaKanjiConverter,
-        GetEffectiveInputMode(),
-        _romajiConverter,
-        _liveConversionEnabled != FALSE);
+    if (_CanUseLiveConversionPreview())
+    {
+        const std::wstring reading = _compositionState.GetReading();
+        _QueueLiveConversionRequest(reading);
+
+        std::wstring completedReading;
+        std::vector<ConversionCandidate> completedCandidates;
+        {
+            std::lock_guard<std::mutex> lock(_liveConversionMutex);
+            if (_liveConversionCompletedVersion == _liveConversionLatestRequestedVersion &&
+                !reading.empty() &&
+                _liveConversionCompletedReading == reading)
+            {
+                completedReading = _liveConversionCompletedReading;
+                completedCandidates = _liveConversionCompletedCandidates;
+            }
+        }
+
+        if (!completedReading.empty())
+        {
+            _compositionState.ApplyLiveConversionPreview(completedReading, completedCandidates);
+        }
+        else if (!_compositionState.HasLiveConversionPreviewForCurrentReading())
+        {
+            _compositionState.ClearLiveConversionPreviewState();
+        }
+    }
+    else
+    {
+        _CancelLiveConversionRequests();
+        _compositionState.ClearLiveConversionPreviewState();
+    }
 
     const std::wstring& preedit = _compositionState.GetPreedit();
     _MarkInternalEdit();
@@ -940,6 +1194,7 @@ HRESULT CTextService::_ClearCompositionText(TfEditCookie ec, ITfContext* pContex
 
 void CTextService::_ResetCompositionState()
 {
+    _CancelLiveConversionRequests();
     _compositionState.Reset();
     _composingText.Reset();
     _compositionPhase = CompositionPhase::Idle;

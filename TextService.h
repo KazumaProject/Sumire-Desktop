@@ -14,7 +14,14 @@
 #ifndef TEXTSERVICE_H
 #define TEXTSERVICE_H
 
+#include <cstdint>
+#include <condition_variable>
 #include <msctf.h>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "CompositionState.h"
 #include "ComposingText.h"
 #include "InputModeState.h"
@@ -167,8 +174,15 @@ public:
     void _ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie ec);
     void _MarkInternalEdit();
     InputMode _GetCompositionInputMode() const;
+    void _ApplyCompletedLiveConversionPreview();
 
 private:
+    BOOL _InitLiveConversionAsync();
+    void _UninitLiveConversionAsync();
+    void _QueueLiveConversionRequest(const std::wstring& reading);
+    void _CancelLiveConversionRequests();
+    bool _CanUseLiveConversionPreview() const;
+
     // initialize and uninitialize ThreadMgrEventSink.
     BOOL _InitThreadMgrEventSink();
     void _UninitThreadMgrEventSink();
@@ -241,6 +255,18 @@ private:
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
     BOOL _pendingAlphabeticShift;
+    HWND _liveConversionWindow;
+    std::thread _liveConversionWorker;
+    std::mutex _liveConversionMutex;
+    std::condition_variable _liveConversionCv;
+    bool _liveConversionWorkerRunning;
+    bool _liveConversionHasPendingRequest;
+    std::wstring _liveConversionPendingReading;
+    std::wstring _liveConversionLatestRequestedReading;
+    std::wstring _liveConversionCompletedReading;
+    std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
+    std::uint64_t _liveConversionLatestRequestedVersion;
+    std::uint64_t _liveConversionCompletedVersion;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;

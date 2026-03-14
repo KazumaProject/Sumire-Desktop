@@ -1,6 +1,7 @@
 #include "CompositionState.h"
 
 #include <algorithm>
+#include <cwctype>
 
 #include "KanaKanjiConverter.h"
 #include "RomajiKanaConverter.h"
@@ -162,6 +163,28 @@ std::wstring BuildRechunkLabel(const std::vector<CompositionState::Segment>& seg
     }
 
     return label;
+}
+
+std::wstring ToLowerAscii(const std::wstring& text)
+{
+    std::wstring result = text;
+    for (wchar_t& ch : result)
+    {
+        ch = static_cast<wchar_t>(towlower(ch));
+    }
+
+    return result;
+}
+
+std::wstring ToUpperAscii(const std::wstring& text)
+{
+    std::wstring result = text;
+    for (wchar_t& ch : result)
+    {
+        ch = static_cast<wchar_t>(towupper(ch));
+    }
+
+    return result;
 }
 }
 
@@ -443,6 +466,39 @@ bool CompositionState::HasLiveConversionPreview() const
     return !_liveConversionText.empty();
 }
 
+bool CompositionState::HasLiveConversionPreviewForCurrentReading() const
+{
+    return !_liveConversionText.empty() && _liveConversionReadingCache == _reading;
+}
+
+void CompositionState::ApplyLiveConversionPreview(
+    const std::wstring& reading,
+    const std::vector<ConversionCandidate>& candidates)
+{
+    if (_phase != CompositionPhase::Composing ||
+        _alphabeticPreeditActive ||
+        reading != _reading ||
+        candidates.empty() ||
+        candidates[0].surface.empty())
+    {
+        ClearLiveConversionPreview();
+        SyncLegacyBuffer();
+        return;
+    }
+
+    _liveConversionReadingCache = reading;
+    _liveConversionCandidates = candidates;
+    _liveConversionText = candidates[0].surface;
+    _liveConversionCursor = static_cast<LONG>(_liveConversionText.size());
+    SyncLegacyBuffer();
+}
+
+void CompositionState::ClearLiveConversionPreviewState()
+{
+    ClearLiveConversionPreview();
+    SyncLegacyBuffer();
+}
+
 void CompositionState::SetAlphabeticPreeditActive(bool active)
 {
     _alphabeticPreeditActive = active;
@@ -506,12 +562,23 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
 
     if (_alphabeticPreeditActive)
     {
+        const std::wstring halfMixed = _rawInput;
+        const std::wstring fullMixed = ToFullwidth(_rawInput);
+        const std::wstring halfLower = ToLowerAscii(_rawInput);
+        const std::wstring fullLower = ToFullwidth(halfLower);
+        const std::wstring halfUpper = ToUpperAscii(_rawInput);
+        const std::wstring fullUpper = ToFullwidth(halfUpper);
+
         Segment segment;
         segment.start = 0;
         segment.end = static_cast<LONG>(_rawInput.size());
         segment.rawText = _rawInput;
-        AppendUniqueCandidate(&segment.candidates, _rawInput);
-        AppendUniqueCandidate(&segment.candidates, ToFullwidth(_rawInput));
+        AppendUniqueCandidate(&segment.candidates, halfMixed);
+        AppendUniqueCandidate(&segment.candidates, fullMixed);
+        AppendUniqueCandidate(&segment.candidates, halfLower);
+        AppendUniqueCandidate(&segment.candidates, fullLower);
+        AppendUniqueCandidate(&segment.candidates, halfUpper);
+        AppendUniqueCandidate(&segment.candidates, fullUpper);
         segment.selectedCandidateIndex = 0;
         segment.currentDisplayText = segment.candidates[0];
         session.segments.push_back(segment);
@@ -524,7 +591,7 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
         bunsetsu.alternatives = segment.candidates;
 
         ConversionCandidate candidate;
-        candidate.surface = _rawInput;
+        candidate.surface = halfMixed;
         candidate.reading = _rawInput;
         candidate.bunsetsu.push_back(bunsetsu);
         session.candidatePaths.push_back(candidate);
@@ -536,11 +603,11 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
         candidateItem.endSegmentIndex = 0;
         candidateItem.sourceCandidateIndex = 0;
         candidateItem.reading = _rawInput;
-        candidateItem.displayText = _rawInput;
-        AppendUniqueCandidateItem(&session.candidateItems, candidateItem);
-
-        candidateItem.displayText = ToFullwidth(_rawInput);
-        AppendUniqueCandidateItem(&session.candidateItems, candidateItem);
+        for (const std::wstring& candidateText : segment.candidates)
+        {
+            candidateItem.displayText = candidateText;
+            AppendUniqueCandidateItem(&session.candidateItems, candidateItem);
+        }
 
         session.focusedSegmentIndex = -1;
         _conversionSession = session;
