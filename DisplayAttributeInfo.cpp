@@ -49,11 +49,11 @@ const WCHAR CDisplayAttributeInfoFocusedConverted::_s_szDescription[] = L"TextSe
 
 const TF_DISPLAYATTRIBUTE CDisplayAttributeInfoInput::_s_DisplayAttribute =
 {
-    { TF_CT_COLORREF, RGB(255, 0, 0) },     // text color
+    { TF_CT_NONE, 0 },                      // text color (app default)
     { TF_CT_NONE, 0 },                      // background color (TF_CT_NONE => app default)
     TF_LS_SOLID,                            // underline style
     FALSE,                                  // underline boldness
-    { TF_CT_COLORREF, RGB(255, 0, 0) },     // underline color
+    { TF_CT_NONE, 0 },                      // underline color (app default)
     TF_ATTR_INPUT                           // attribute info
 };
 
