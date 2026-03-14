@@ -125,6 +125,7 @@ CTextService::CTextService()
     // composition セッション段階を既定値に初期化
     //
     _compositionPhase = CompositionPhase::Idle;
+    _liveConversionEnabled = TRUE;
     _pendingInternalEdits = 0;
 
     _tfClientId = TF_CLIENTID_NULL;
@@ -469,6 +470,16 @@ void CTextService::SetCompositionPhase(CompositionPhase phase)
 CompositionPhase CTextService::GetCompositionPhase() const
 {
     return _compositionPhase;
+}
+
+void CTextService::SetLiveConversionEnabled(BOOL enabled)
+{
+    _liveConversionEnabled = enabled;
+}
+
+BOOL CTextService::IsLiveConversionEnabled() const
+{
+    return _liveConversionEnabled;
 }
 
 
@@ -817,6 +828,12 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
     {
         return E_FAIL;
     }
+
+    _compositionState.RefreshLiveConversionPreview(
+        _kanaKanjiConverter,
+        GetEffectiveInputMode(),
+        _romajiConverter,
+        _liveConversionEnabled != FALSE);
 
     const std::wstring& preedit = _compositionState.GetPreedit();
     _MarkInternalEdit();

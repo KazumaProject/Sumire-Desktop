@@ -104,6 +104,12 @@ public:
 
     void SetPhase(CompositionPhase phase);
     CompositionPhase GetPhase() const;
+    void RefreshLiveConversionPreview(
+        const KanaKanjiConverter& kanaKanjiConverter,
+        InputMode mode,
+        const RomajiKanaConverter& converter,
+        bool enabled);
+    bool HasLiveConversionPreview() const;
 
     const std::vector<std::wstring>& GetCandidates() const;
     const std::vector<ConversionCandidate>& GetConversionCandidates() const;
@@ -166,10 +172,14 @@ private:
     static std::wstring ToFullwidth(const std::wstring& src);
     static std::wstring HiraganaToFullwidthKatakana(const std::wstring& src);
     static std::wstring HiraganaToHalfwidthKatakana(const std::wstring& src);
+    void ClearLiveConversionPreview();
 
     std::wstring _rawInput;
     std::wstring _reading;
     std::wstring _preedit;
+    std::wstring _liveConversionText;
+    LONG _liveConversionCursor;
+    std::vector<ConversionCandidate> _liveConversionCandidates;
     LONG _rawCursor;
     LONG _caretPosition;
     LONG _preeditCursor;

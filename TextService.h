@@ -136,6 +136,8 @@ public:
     void SetUserInputMode(InputMode mode);
     InputMode GetUserInputMode() const;
     InputMode GetEffectiveInputMode() const;
+    void SetLiveConversionEnabled(BOOL enabled);
+    BOOL IsLiveConversionEnabled() const;
     BOOL HasInputScopeOverride() const;
     void SetInputScopeOverride(InputMode mode);
     void ClearInputScopeOverride();
@@ -235,6 +237,7 @@ private:
     InputScopeEvaluator _inputScopeEvaluator;
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
+    BOOL _liveConversionEnabled;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;
