@@ -104,6 +104,19 @@ public:
 
     void SetPhase(CompositionPhase phase);
     CompositionPhase GetPhase() const;
+    void RefreshLiveConversionPreview(
+        const KanaKanjiConverter& kanaKanjiConverter,
+        InputMode mode,
+        const RomajiKanaConverter& converter,
+        bool enabled);
+    bool HasLiveConversionPreview() const;
+    bool HasLiveConversionPreviewForCurrentReading() const;
+    void ApplyLiveConversionPreview(
+        const std::wstring& reading,
+        const std::vector<ConversionCandidate>& candidates);
+    void ClearLiveConversionPreviewState();
+    void SetAlphabeticPreeditActive(bool active);
+    bool IsAlphabeticPreeditActive() const;
 
     const std::vector<std::wstring>& GetCandidates() const;
     const std::vector<ConversionCandidate>& GetConversionCandidates() const;
@@ -117,6 +130,7 @@ public:
     bool SelectPrevCandidate();
     bool SelectFirstCandidate();
     bool SelectLastCandidate();
+    bool SelectCandidatePage(int delta, int pageSize);
     bool ApplySelectedRechunkOption();
     bool CancelRechunkSelection();
     bool MoveFocusLeft();
@@ -165,10 +179,16 @@ private:
     static std::wstring ToFullwidth(const std::wstring& src);
     static std::wstring HiraganaToFullwidthKatakana(const std::wstring& src);
     static std::wstring HiraganaToHalfwidthKatakana(const std::wstring& src);
+    void ClearLiveConversionPreview();
 
     std::wstring _rawInput;
     std::wstring _reading;
     std::wstring _preedit;
+    std::wstring _liveConversionText;
+    LONG _liveConversionCursor;
+    std::vector<ConversionCandidate> _liveConversionCandidates;
+    std::wstring _liveConversionReadingCache;
+    bool _alphabeticPreeditActive;
     LONG _rawCursor;
     LONG _caretPosition;
     LONG _preeditCursor;

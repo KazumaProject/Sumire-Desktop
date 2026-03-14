@@ -170,6 +170,10 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lPara
     //
     switch (wParam)
     {
+    case VK_SHIFT:
+        if (GetEffectiveInputMode() == InputMode::Hiragana)
+            return TRUE;
+        return FALSE;
     case VK_LEFT:
     case VK_RIGHT:
     case VK_RETURN:

@@ -1,6 +1,7 @@
 #include "CompositionState.h"
 
 #include <algorithm>
+#include <cwctype>
 
 #include "KanaKanjiConverter.h"
 #include "RomajiKanaConverter.h"
@@ -163,6 +164,28 @@ std::wstring BuildRechunkLabel(const std::vector<CompositionState::Segment>& seg
 
     return label;
 }
+
+std::wstring ToLowerAscii(const std::wstring& text)
+{
+    std::wstring result = text;
+    for (wchar_t& ch : result)
+    {
+        ch = static_cast<wchar_t>(towlower(ch));
+    }
+
+    return result;
+}
+
+std::wstring ToUpperAscii(const std::wstring& text)
+{
+    std::wstring result = text;
+    for (wchar_t& ch : result)
+    {
+        ch = static_cast<wchar_t>(towupper(ch));
+    }
+
+    return result;
+}
 }
 
 CompositionState::CompositionState()
@@ -175,6 +198,11 @@ void CompositionState::Reset()
     _rawInput.clear();
     _reading.clear();
     _preedit.clear();
+    _liveConversionText.clear();
+    _liveConversionCursor = 0;
+    _liveConversionCandidates.clear();
+    _liveConversionReadingCache.clear();
+    _alphabeticPreeditActive = false;
     _rawCursor = 0;
     _caretPosition = 0;
     _preeditCursor = 0;
@@ -361,7 +389,7 @@ const std::wstring& CompositionState::GetReading() const
 
 const std::wstring& CompositionState::GetPreedit() const
 {
-    return _preedit;
+    return !_liveConversionText.empty() ? _liveConversionText : _preedit;
 }
 
 const std::vector<LONG>& CompositionState::GetBoundaries() const
@@ -381,7 +409,7 @@ LONG CompositionState::GetCaretPosition() const
 
 LONG CompositionState::GetPreeditCursor() const
 {
-    return _preeditCursor;
+    return !_liveConversionText.empty() ? _liveConversionCursor : _preeditCursor;
 }
 
 void CompositionState::SetPhase(CompositionPhase phase)
@@ -392,6 +420,98 @@ void CompositionState::SetPhase(CompositionPhase phase)
 CompositionPhase CompositionState::GetPhase() const
 {
     return _phase;
+}
+
+void CompositionState::RefreshLiveConversionPreview(
+    const KanaKanjiConverter& kanaKanjiConverter,
+    InputMode mode,
+    const RomajiKanaConverter& converter,
+    bool enabled)
+{
+    if (!enabled ||
+        _phase != CompositionPhase::Composing ||
+        _rawInput.empty() ||
+        (_caretPosition + 1) < static_cast<LONG>(_preedit.size()) ||
+        mode != InputMode::Hiragana ||
+        _alphabeticPreeditActive)
+    {
+        ClearLiveConversionPreview();
+        SyncLegacyBuffer();
+        return;
+    }
+
+    if (_liveConversionReadingCache == _reading && !_liveConversionText.empty())
+    {
+        SyncLegacyBuffer();
+        return;
+    }
+
+    const ConversionResult result = kanaKanjiConverter.Convert(_reading);
+    _liveConversionCandidates = result.candidates;
+    _liveConversionReadingCache = _reading;
+    if (_liveConversionCandidates.empty() || _liveConversionCandidates[0].surface.empty())
+    {
+        ClearLiveConversionPreview();
+        SyncLegacyBuffer();
+        return;
+    }
+
+    _liveConversionText = _liveConversionCandidates[0].surface;
+    _liveConversionCursor = static_cast<LONG>(_liveConversionText.size());
+    SyncLegacyBuffer();
+}
+
+bool CompositionState::HasLiveConversionPreview() const
+{
+    return !_liveConversionText.empty();
+}
+
+bool CompositionState::HasLiveConversionPreviewForCurrentReading() const
+{
+    return !_liveConversionText.empty() && _liveConversionReadingCache == _reading;
+}
+
+void CompositionState::ApplyLiveConversionPreview(
+    const std::wstring& reading,
+    const std::vector<ConversionCandidate>& candidates)
+{
+    if (_phase != CompositionPhase::Composing ||
+        _alphabeticPreeditActive ||
+        reading != _reading ||
+        candidates.empty() ||
+        candidates[0].surface.empty())
+    {
+        ClearLiveConversionPreview();
+        SyncLegacyBuffer();
+        return;
+    }
+
+    _liveConversionReadingCache = reading;
+    _liveConversionCandidates = candidates;
+    _liveConversionText = candidates[0].surface;
+    _liveConversionCursor = static_cast<LONG>(_liveConversionText.size());
+    SyncLegacyBuffer();
+}
+
+void CompositionState::ClearLiveConversionPreviewState()
+{
+    ClearLiveConversionPreview();
+    SyncLegacyBuffer();
+}
+
+void CompositionState::SetAlphabeticPreeditActive(bool active)
+{
+    _alphabeticPreeditActive = active;
+    if (active)
+    {
+        ClearLiveConversionPreview();
+    }
+    SyncLegacyBuffer();
+}
+
+bool CompositionState::IsAlphabeticPreeditActive() const
+{
+    return _alphabeticPreeditActive;
 }
 
 const std::vector<std::wstring>& CompositionState::GetCandidates() const
@@ -439,6 +559,63 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
 
     ConversionSession session;
     session.originalCaretPosition = _caretPosition;
+
+    if (_alphabeticPreeditActive)
+    {
+        const std::wstring halfMixed = _rawInput;
+        const std::wstring fullMixed = ToFullwidth(_rawInput);
+        const std::wstring halfLower = ToLowerAscii(_rawInput);
+        const std::wstring fullLower = ToFullwidth(halfLower);
+        const std::wstring halfUpper = ToUpperAscii(_rawInput);
+        const std::wstring fullUpper = ToFullwidth(halfUpper);
+
+        Segment segment;
+        segment.start = 0;
+        segment.end = static_cast<LONG>(_rawInput.size());
+        segment.rawText = _rawInput;
+        AppendUniqueCandidate(&segment.candidates, halfMixed);
+        AppendUniqueCandidate(&segment.candidates, fullMixed);
+        AppendUniqueCandidate(&segment.candidates, halfLower);
+        AppendUniqueCandidate(&segment.candidates, fullLower);
+        AppendUniqueCandidate(&segment.candidates, halfUpper);
+        AppendUniqueCandidate(&segment.candidates, fullUpper);
+        segment.selectedCandidateIndex = 0;
+        segment.currentDisplayText = segment.candidates[0];
+        session.segments.push_back(segment);
+
+        BunsetsuConversion bunsetsu;
+        bunsetsu.start = 0;
+        bunsetsu.length = static_cast<int>(_rawInput.size());
+        bunsetsu.reading = _rawInput;
+        bunsetsu.surface = _rawInput;
+        bunsetsu.alternatives = segment.candidates;
+
+        ConversionCandidate candidate;
+        candidate.surface = halfMixed;
+        candidate.reading = _rawInput;
+        candidate.bunsetsu.push_back(bunsetsu);
+        session.candidatePaths.push_back(candidate);
+
+        CandidateItem candidateItem;
+        candidateItem.start = 0;
+        candidateItem.end = static_cast<LONG>(_rawInput.size());
+        candidateItem.startSegmentIndex = 0;
+        candidateItem.endSegmentIndex = 0;
+        candidateItem.sourceCandidateIndex = 0;
+        candidateItem.reading = _rawInput;
+        for (const std::wstring& candidateText : segment.candidates)
+        {
+            candidateItem.displayText = candidateText;
+            AppendUniqueCandidateItem(&session.candidateItems, candidateItem);
+        }
+
+        session.focusedSegmentIndex = -1;
+        _conversionSession = session;
+        _phase = CompositionPhase::Converting;
+        UpdateBoundariesFromSegments();
+        RebuildConversionDisplay();
+        return true;
+    }
 
     const ConversionResult result = kanaKanjiConverter.Convert(_reading);
     if (result.candidates.empty())
@@ -693,6 +870,48 @@ bool CompositionState::SelectLastCandidate()
     UpdateSegmentSelection(*segment, static_cast<int>(segment->candidates.size()) - 1);
     _phase = CompositionPhase::CandidateSelecting;
     RebuildConversionDisplay();
+    return true;
+}
+
+bool CompositionState::SelectCandidatePage(int delta, int pageSize)
+{
+    if (pageSize <= 0 || !HasCandidates())
+    {
+        return false;
+    }
+
+    const int candidateCount = static_cast<int>(GetCandidates().size());
+    if (candidateCount <= 0)
+    {
+        return false;
+    }
+
+    int selectedIndex = GetSelectedCandidateIndex();
+    if (selectedIndex < 0 || selectedIndex >= candidateCount)
+    {
+        selectedIndex = 0;
+    }
+
+    const int pageCount = (candidateCount + pageSize - 1) / pageSize;
+    const int rowIndex = selectedIndex % pageSize;
+    int pageIndex = selectedIndex / pageSize;
+    pageIndex += delta;
+    while (pageIndex < 0)
+    {
+        pageIndex += pageCount;
+    }
+    while (pageIndex >= pageCount)
+    {
+        pageIndex -= pageCount;
+    }
+
+    int targetIndex = pageIndex * pageSize + rowIndex;
+    if (targetIndex >= candidateCount)
+    {
+        targetIndex = candidateCount - 1;
+    }
+
+    SetSelectedCandidateIndex(targetIndex);
     return true;
 }
 
@@ -953,6 +1172,7 @@ void CompositionState::RebuildTexts(InputMode mode, const RomajiKanaConverter& c
 {
     _reading = converter.ConvertFromRaw(_rawInput);
     _preedit = BuildPreeditText(_rawInput, mode, converter);
+    ClearLiveConversionPreview();
 
     SyncCaretFromRawCursor(mode, converter);
     _preeditCursor = _caretPosition;
@@ -969,6 +1189,7 @@ void CompositionState::RebuildConversionDisplay()
 {
     std::wstring converted;
     LONG focusCursor = -1;
+    ClearLiveConversionPreview();
 
     for (size_t i = 0; i < _conversionSession.segments.size(); ++i)
     {
@@ -1340,7 +1561,23 @@ void CompositionState::SyncLegacyBuffer()
 {
     _legacyBuffer.SetRaw(_rawInput, _rawCursor);
     _legacyBuffer.SetSurface(_preedit, _preeditCursor);
-    _legacyBuffer.ClearLiveConversionText();
+    _legacyBuffer.EnableLiveConversion(!_liveConversionText.empty());
+    if (_liveConversionText.empty())
+    {
+        _legacyBuffer.ClearLiveConversionText();
+    }
+    else
+    {
+        _legacyBuffer.SetLiveConversionText(_liveConversionText);
+    }
+}
+
+void CompositionState::ClearLiveConversionPreview()
+{
+    _liveConversionText.clear();
+    _liveConversionCursor = 0;
+    _liveConversionCandidates.clear();
+    _liveConversionReadingCache.clear();
 }
 
 std::wstring CompositionState::BuildPreeditText(const std::wstring& raw, InputMode mode, const RomajiKanaConverter& converter)

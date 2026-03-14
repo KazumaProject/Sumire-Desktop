@@ -27,6 +27,8 @@
 class CCandidateWindow : public ITfCandidateListUIElementBehavior
 {
 public:
+    static constexpr UINT kCandidatePageSize = 9;
+
     CCandidateWindow(CTextService *pTextService);
     ~CCandidateWindow();
 

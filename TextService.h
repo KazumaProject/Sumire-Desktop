@@ -14,7 +14,14 @@
 #ifndef TEXTSERVICE_H
 #define TEXTSERVICE_H
 
+#include <cstdint>
+#include <condition_variable>
 #include <msctf.h>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "CompositionState.h"
 #include "ComposingText.h"
 #include "InputModeState.h"
@@ -108,6 +115,7 @@ public:
 
     // key event handlers.
     HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    HRESULT _HandleShiftKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
@@ -117,6 +125,8 @@ public:
     HRESULT _HandleModeToggleKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectNextCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _SelectNextCandidatePage(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _SelectPrevCandidatePage(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectFirstCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectLastCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _CommitCurrentCandidate(TfEditCookie ec, ITfContext* pContext);
@@ -134,6 +144,8 @@ public:
     void SetUserInputMode(InputMode mode);
     InputMode GetUserInputMode() const;
     InputMode GetEffectiveInputMode() const;
+    void SetLiveConversionEnabled(BOOL enabled);
+    BOOL IsLiveConversionEnabled() const;
     BOOL HasInputScopeOverride() const;
     void SetInputScopeOverride(InputMode mode);
     void ClearInputScopeOverride();
@@ -161,8 +173,16 @@ public:
     // TSF の read edit session から呼ばれるため public に公開する。
     void _ApplyInputScopeOverride(ITfContext* pContext, TfEditCookie ec);
     void _MarkInternalEdit();
+    InputMode _GetCompositionInputMode() const;
+    void _ApplyCompletedLiveConversionPreview();
 
 private:
+    BOOL _InitLiveConversionAsync();
+    void _UninitLiveConversionAsync();
+    void _QueueLiveConversionRequest(const std::wstring& reading);
+    void _CancelLiveConversionRequests();
+    bool _CanUseLiveConversionPreview() const;
+
     // initialize and uninitialize ThreadMgrEventSink.
     BOOL _InitThreadMgrEventSink();
     void _UninitThreadMgrEventSink();
@@ -233,6 +253,20 @@ private:
     InputScopeEvaluator _inputScopeEvaluator;
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
+    BOOL _liveConversionEnabled;
+    BOOL _pendingAlphabeticShift;
+    HWND _liveConversionWindow;
+    std::thread _liveConversionWorker;
+    std::mutex _liveConversionMutex;
+    std::condition_variable _liveConversionCv;
+    bool _liveConversionWorkerRunning;
+    bool _liveConversionHasPendingRequest;
+    std::wstring _liveConversionPendingReading;
+    std::wstring _liveConversionLatestRequestedReading;
+    std::wstring _liveConversionCompletedReading;
+    std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
+    std::uint64_t _liveConversionLatestRequestedVersion;
+    std::uint64_t _liveConversionCompletedVersion;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;
