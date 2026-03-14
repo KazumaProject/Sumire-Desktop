@@ -638,7 +638,7 @@ void CompositionState::RebuildBoundaries()
 void CompositionState::RebuildConversionDisplay()
 {
     std::wstring converted;
-    LONG focusCursor = 0;
+    LONG focusCursor = -1;
 
     for (size_t i = 0; i < _conversionSession.segments.size(); ++i)
     {
@@ -647,6 +647,11 @@ void CompositionState::RebuildConversionDisplay()
         {
             focusCursor = static_cast<LONG>(converted.size());
         }
+    }
+
+    if (focusCursor < 0)
+    {
+        focusCursor = static_cast<LONG>(converted.size());
     }
 
     _preedit = converted;
