@@ -36,6 +36,8 @@ KanaKanjiConverter::KanaKanjiConverter()
     _dictionary[L"\u305b\u3093\u305b\u3044"] = { L"\u5148\u751f" };
     _dictionary[L"\u3058\u304b\u3093"] = { L"\u6642\u9593" };
     _dictionary[L"\u3058\u3057\u3087"] = { L"\u8f9e\u66f8" };
+    _dictionary[L"\u3066\u3093\u304d"] = { L"\u5929\u6c17" };
+    _dictionary[L"\u3044\u3044"] = { L"\u826f\u3044", L"\u3044\u3044" };
     _dictionary[L"\u3072\u3089\u304c\u306a"] = { L"\u5e73\u4eee\u540d", L"\u3072\u3089\u304c\u306a" };
     _dictionary[L"\u304b\u305f\u304b\u306a"] = { L"\u7247\u4eee\u540d", L"\u30ab\u30bf\u30ab\u30ca" };
 }

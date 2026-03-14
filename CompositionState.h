@@ -8,6 +8,7 @@
 #include "ComposingText.h"
 #include "InputModeState.h"
 
+class KanaKanjiConverter;
 class RomajiKanaConverter;
 
 enum class CompositionPhase
@@ -21,6 +22,31 @@ enum class CompositionPhase
 class CompositionState
 {
 public:
+    struct Segment
+    {
+        LONG start = 0;
+        LONG end = 0;
+        std::wstring rawText;
+        std::vector<std::wstring> candidates;
+        int selectedCandidateIndex = -1;
+        std::wstring currentDisplayText;
+        bool isCommitted = false;
+    };
+
+    struct DisplaySpan
+    {
+        LONG start = 0;
+        LONG end = 0;
+        bool focused = false;
+    };
+
+    struct ConversionSession
+    {
+        std::vector<Segment> segments;
+        int focusedSegmentIndex = -1;
+        LONG originalCaretPosition = 0;
+    };
+
     CompositionState();
 
     void Reset();
@@ -38,22 +64,30 @@ public:
     const std::wstring& GetRawInput() const;
     const std::wstring& GetReading() const;
     const std::wstring& GetPreedit() const;
+    const std::vector<LONG>& GetBoundaries() const;
     LONG GetRawCursor() const;
+    LONG GetCaretPosition() const;
     LONG GetPreeditCursor() const;
 
     void SetPhase(CompositionPhase phase);
     CompositionPhase GetPhase() const;
 
-    std::vector<std::wstring>& MutableCandidates();
     const std::vector<std::wstring>& GetCandidates() const;
-    void StartConversion(const std::vector<std::wstring>& candidates);
+    bool StartConversion(const KanaKanjiConverter& kanaKanjiConverter, InputMode mode, const RomajiKanaConverter& converter);
     void EnterCandidateSelecting();
+    bool BeginSegmentSelection();
     bool SelectNextCandidate();
     bool SelectPrevCandidate();
     bool SelectFirstCandidate();
     bool SelectLastCandidate();
+    bool MoveFocusLeft();
+    bool MoveFocusRight();
+    bool CommitFocusedSegment();
+    bool HasFocusedSegment() const;
+    bool HasUncommittedSegments() const;
     bool HasSelectedCandidate() const;
     const std::wstring& GetSelectedCandidate() const;
+    std::vector<DisplaySpan> GetDisplaySpans() const;
     void CancelConversion(InputMode mode, const RomajiKanaConverter& converter);
     std::wstring GetHiraganaText(const RomajiKanaConverter& converter) const;
     std::wstring GetKatakanaText(const RomajiKanaConverter& converter) const;
@@ -65,9 +99,24 @@ public:
 
 private:
     void RebuildTexts(InputMode mode, const RomajiKanaConverter& converter);
+    void RebuildBoundaries();
+    void RebuildConversionDisplay();
+    void ResetConversionSession();
+    void SyncRawCursorFromCaret(InputMode mode, const RomajiKanaConverter& converter);
+    void SyncCaretFromRawCursor(InputMode mode, const RomajiKanaConverter& converter);
+    LONG GetReadingCursor(const RomajiKanaConverter& converter) const;
+    int FindPrevUncommittedSegment(int startIndex) const;
+    int FindFirstUncommittedSegment() const;
+    int FindNextUncommittedSegment(int startIndex) const;
+    Segment* GetFocusedSegment();
+    const Segment* GetFocusedSegment() const;
+    void UpdateSegmentSelection(Segment& segment, int index);
     void SyncLegacyBuffer();
     static std::wstring BuildPreeditText(const std::wstring& raw, InputMode mode, const RomajiKanaConverter& converter);
     static LONG RawCursorFromVisibleCursor(const std::wstring& raw, LONG visibleCursor, InputMode mode, const RomajiKanaConverter& converter);
+    static std::vector<LONG> NormalizeBoundaries(const std::wstring& text, const std::vector<LONG>& boundaries);
+    static std::vector<LONG> BuildDefaultBoundaries(const std::wstring& text);
+    static bool IsParticleBoundaryCandidate(WCHAR ch);
     static std::wstring ToFullwidth(const std::wstring& src);
     static std::wstring HiraganaToFullwidthKatakana(const std::wstring& src);
     static std::wstring HiraganaToHalfwidthKatakana(const std::wstring& src);
@@ -76,9 +125,10 @@ private:
     std::wstring _reading;
     std::wstring _preedit;
     LONG _rawCursor;
+    LONG _caretPosition;
     LONG _preeditCursor;
-    std::vector<std::wstring> _candidates;
-    int _selectedCandidateIndex;
+    std::vector<LONG> _boundaries;
+    ConversionSession _conversionSession;
     CompositionPhase _phase;
 
     ComposingText _legacyBuffer;

@@ -222,6 +222,7 @@ private:
     // guidatom for the display attibute.
     TfGuidAtom _gaDisplayAttributeInput;
     TfGuidAtom _gaDisplayAttributeConverted;
+    TfGuidAtom _gaDisplayAttributeFocusedConverted;
 
     // the candidate list object.
     CCandidateList* _pCandidateList;

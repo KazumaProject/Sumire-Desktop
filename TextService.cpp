@@ -114,6 +114,7 @@ CTextService::CTextService()
     //
     _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
     _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
+    _gaDisplayAttributeFocusedConverted = TF_INVALID_GUIDATOM;
 
     //
     // Initialize composing text / romaji converter.
@@ -158,6 +159,7 @@ CTextService::~CTextService()
 
     _gaDisplayAttributeInput = TF_INVALID_GUIDATOM;
     _gaDisplayAttributeConverted = TF_INVALID_GUIDATOM;
+    _gaDisplayAttributeFocusedConverted = TF_INVALID_GUIDATOM;
 
     _compositionPhase = CompositionPhase::Idle;
     _pendingInternalEdits = 0;
@@ -753,6 +755,56 @@ void CTextService::_MarkInternalEdit()
     ++_pendingInternalEdits;
 }
 
+namespace
+{
+BOOL ApplyDisplayAttributeToRange(
+    ITfContext* pContext,
+    TfEditCookie ec,
+    ITfRange* pRangeComposition,
+    LONG start,
+    LONG end,
+    TfGuidAtom gaDisplayAttribute)
+{
+    if (pContext == NULL || pRangeComposition == NULL || end <= start)
+    {
+        return FALSE;
+    }
+
+    ITfRange* pAttributeRange = NULL;
+    if (pRangeComposition->Clone(&pAttributeRange) != S_OK || pAttributeRange == NULL)
+    {
+        return FALSE;
+    }
+
+    pAttributeRange->Collapse(ec, TF_ANCHOR_START);
+
+    LONG moved = 0;
+    if (start > 0)
+    {
+        pAttributeRange->ShiftStart(ec, start, &moved, NULL);
+    }
+
+    if (end > start)
+    {
+        pAttributeRange->ShiftEnd(ec, end - start, &moved, NULL);
+    }
+
+    ITfProperty* pDisplayAttributeProperty = NULL;
+    HRESULT hr = E_FAIL;
+    if (pContext->GetProperty(GUID_PROP_ATTRIBUTE, &pDisplayAttributeProperty) == S_OK)
+    {
+        VARIANT var = {};
+        var.vt = VT_I4;
+        var.lVal = gaDisplayAttribute;
+        hr = pDisplayAttributeProperty->SetValue(ec, pAttributeRange, &var);
+        pDisplayAttributeProperty->Release();
+    }
+
+    pAttributeRange->Release();
+    return hr == S_OK;
+}
+}
+
 HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pContext)
 {
     if (_pComposition == NULL || pContext == NULL)
@@ -790,14 +842,34 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
             pSelectionRange->Release();
         }
 
-        TfGuidAtom gaDisplayAttribute = _gaDisplayAttributeInput;
         if (_compositionState.GetPhase() == CompositionPhase::Converting ||
             _compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
         {
-            gaDisplayAttribute = _gaDisplayAttributeConverted;
-        }
+            _ClearCompositionDisplayAttributes(ec, pContext);
 
-        _SetCompositionDisplayAttributes(ec, pContext, gaDisplayAttribute);
+            std::vector<CompositionState::DisplaySpan> spans = _compositionState.GetDisplaySpans();
+            if (spans.empty())
+            {
+                _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeConverted);
+            }
+            else
+            {
+                for (const CompositionState::DisplaySpan& span : spans)
+                {
+                    ApplyDisplayAttributeToRange(
+                        pContext,
+                        ec,
+                        pRangeComposition,
+                        span.start,
+                        span.end,
+                        span.focused ? _gaDisplayAttributeFocusedConverted : _gaDisplayAttributeConverted);
+                }
+            }
+        }
+        else
+        {
+            _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
+        }
     }
 
     pRangeComposition->Release();
@@ -897,12 +969,37 @@ HRESULT CTextService::_CommitCurrentCandidate(TfEditCookie ec, ITfContext* pCont
         return S_OK;
     }
 
+    if (_compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
+    {
+        if (!_compositionState.CommitFocusedSegment())
+        {
+            return S_FALSE;
+        }
+
+        _compositionPhase = _compositionState.GetPhase();
+        HRESULT hr = _UpdateCompositionText(ec, pContext);
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+
+        if (_compositionState.HasUncommittedSegments())
+        {
+            return S_OK;
+        }
+
+        _CloseCandidateList();
+        _TerminateComposition(ec, pContext);
+        return S_OK;
+    }
+
     HRESULT hr = _UpdateCompositionText(ec, pContext);
     if (FAILED(hr))
     {
         return hr;
     }
 
+    _CloseCandidateList();
     _TerminateComposition(ec, pContext);
     return S_OK;
 }

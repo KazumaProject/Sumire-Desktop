@@ -65,6 +65,11 @@ STDAPI CTextService::GetDisplayAttributeInfo(REFGUID guidInfo, ITfDisplayAttribu
         if ((*ppInfo = new CDisplayAttributeInfoConverted()) == NULL)
             return E_OUTOFMEMORY;
     }
+    else if (IsEqualGUID(guidInfo, c_guidDisplayAttributeFocusedConverted))
+    {
+        if ((*ppInfo = new CDisplayAttributeInfoFocusedConverted()) == NULL)
+            return E_OUTOFMEMORY;
+    }
     else
     {
         return E_INVALIDARG;

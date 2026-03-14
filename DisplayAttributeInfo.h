@@ -12,6 +12,7 @@
 //          CDisplayAttributeInfo class
 //          CDisplayAttributeInfoInput class
 //          CDisplayAttributeInfoConverted class
+//          CDisplayAttributeInfoFocusedConverted class
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -86,6 +87,22 @@ public:
     CDisplayAttributeInfoConverted()
     {
         _pguid = &c_guidDisplayAttributeConverted;
+        _pDisplayAttribute = &_s_DisplayAttribute;
+        _pszDescription = _s_szDescription;
+        _pszValueName = _s_szValueName;
+    }
+
+    static const TF_DISPLAYATTRIBUTE _s_DisplayAttribute;
+    static const WCHAR _s_szDescription[];
+    static const TCHAR _s_szValueName[];
+};
+
+class CDisplayAttributeInfoFocusedConverted : public CDisplayAttributeInfo
+{
+public:
+    CDisplayAttributeInfoFocusedConverted()
+    {
+        _pguid = &c_guidDisplayAttributeFocusedConverted;
         _pDisplayAttribute = &_s_DisplayAttribute;
         _pszDescription = _s_szDescription;
         _pszValueName = _s_szValueName;

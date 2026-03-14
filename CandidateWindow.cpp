@@ -68,6 +68,40 @@ private:
     WCHAR _szText[256];
 };
 
+class CSelectCandidateEditSession : public CEditSessionBase
+{
+public:
+    CSelectCandidateEditSession(CTextService* pTextService, ITfContext* pContext, UINT index)
+        : CEditSessionBase(pTextService, pContext)
+    {
+        _index = index;
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec)
+    {
+        _pTextService->_GetCompositionState().SetSelectedCandidateIndex(static_cast<int>(_index));
+        _pTextService->SetCompositionPhase(_pTextService->_GetCompositionState().GetPhase());
+        return _pTextService->_UpdateCompositionText(ec, _pContext);
+    }
+
+private:
+    UINT _index;
+};
+
+class CCommitCandidateEditSession : public CEditSessionBase
+{
+public:
+    CCommitCandidateEditSession(CTextService* pTextService, ITfContext* pContext)
+        : CEditSessionBase(pTextService, pContext)
+    {
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec)
+    {
+        return _pTextService->_CommitCurrentCandidate(ec, _pContext);
+    }
+};
+
 //+---------------------------------------------------------------------------
 //
 // DoEditSession
@@ -415,6 +449,32 @@ STDAPI CCandidateWindow::SetSelection(UINT nIndex)
     if (uNewPage != uOldPage)
         _dwUpdatetFlags |= TF_CLUIE_CURRENTPAGE;
 
+    ITfRange* pRange = NULL;
+    ITfContext* pContext = NULL;
+    if (_pTextService->_GetComposition() != NULL &&
+        _pTextService->_GetComposition()->GetRange(&pRange) == S_OK &&
+        pRange != NULL &&
+        pRange->GetContext(&pContext) == S_OK &&
+        pContext != NULL)
+    {
+        CSelectCandidateEditSession* pEditSession = new CSelectCandidateEditSession(_pTextService, pContext, nIndex);
+        if (pEditSession != NULL)
+        {
+            HRESULT hr = E_FAIL;
+            pContext->RequestEditSession(_pTextService->_GetClientId(), pEditSession, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+            pEditSession->Release();
+        }
+    }
+
+    if (pContext != NULL)
+    {
+        pContext->Release();
+    }
+    if (pRange != NULL)
+    {
+        pRange->Release();
+    }
+
     _CallUpdateUIElement();
     return S_OK;
 }
@@ -427,8 +487,43 @@ STDAPI CCandidateWindow::SetSelection(UINT nIndex)
 
 STDAPI CCandidateWindow::Finalize()
 {
+    ITfRange* pRange = NULL;
+    ITfContext* pContext = NULL;
+    if (_pTextService->_GetComposition() != NULL &&
+        _pTextService->_GetComposition()->GetRange(&pRange) == S_OK &&
+        pRange != NULL &&
+        pRange->GetContext(&pContext) == S_OK &&
+        pContext != NULL)
+    {
+        CCommitCandidateEditSession* pEditSession = new CCommitCandidateEditSession(_pTextService, pContext);
+        if (pEditSession != NULL)
+        {
+            HRESULT hr = E_FAIL;
+            pContext->RequestEditSession(_pTextService->_GetClientId(), pEditSession, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+            pEditSession->Release();
+        }
+    }
+
+    if (pContext != NULL)
+    {
+        pContext->Release();
+    }
+    if (pRange != NULL)
+    {
+        pRange->Release();
+    }
+
     if (_pTextService->_GetCandidateList())
-        _pTextService->_GetCandidateList()->_EndCandidateList();
+    {
+        if (_pTextService->_GetCompositionState().GetPhase() == CompositionPhase::CandidateSelecting)
+        {
+            _RefreshFromState();
+        }
+        else
+        {
+            _pTextService->_GetCandidateList()->_EndCandidateList();
+        }
+    }
     return S_OK;
 }
 
