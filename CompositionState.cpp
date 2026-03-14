@@ -12,6 +12,37 @@ const std::vector<std::wstring>& EmptyCandidates()
     static const std::vector<std::wstring> kEmptyCandidates;
     return kEmptyCandidates;
 }
+
+void AppendUniqueCandidate(std::vector<std::wstring>* candidates, const std::wstring& candidate)
+{
+    if (candidate.empty())
+    {
+        return;
+    }
+
+    for (const std::wstring& existing : *candidates)
+    {
+        if (existing == candidate)
+        {
+            return;
+        }
+    }
+
+    candidates->push_back(candidate);
+}
+
+int FindCandidateIndex(const std::vector<std::wstring>& candidates, const std::wstring& value)
+{
+    for (size_t index = 0; index < candidates.size(); ++index)
+    {
+        if (candidates[index] == value)
+        {
+            return static_cast<int>(index);
+        }
+    }
+
+    return -1;
+}
 }
 
 CompositionState::CompositionState()
@@ -252,45 +283,67 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
     ConversionSession session;
     session.originalCaretPosition = _caretPosition;
 
-    const LONG readingCaret = GetReadingCursor(converter);
-    const std::vector<LONG> normalizedBoundaries = NormalizeBoundaries(_reading, _boundaries);
-
-    LONG start = 0;
-    for (LONG boundary : normalizedBoundaries)
+    const ConversionResult result = kanaKanjiConverter.Convert(_reading);
+    if (result.candidates.empty())
     {
-        if (boundary <= start)
+        return false;
+    }
+
+    const ConversionCandidate& candidate = result.candidates[0];
+    _boundaries.clear();
+    for (int boundary : result.bestBoundaries)
+    {
+        _boundaries.push_back(static_cast<LONG>(boundary));
+    }
+
+    for (const BunsetsuConversion& bunsetsu : candidate.bunsetsu)
+    {
+        if (bunsetsu.length <= 0)
+        {
+            continue;
+        }
+
+        const LONG start = static_cast<LONG>(bunsetsu.start);
+        const LONG end = static_cast<LONG>(bunsetsu.start + bunsetsu.length);
+        if (start < 0 || end > static_cast<LONG>(_reading.size()) || start >= end)
         {
             continue;
         }
 
         Segment segment;
         segment.start = start;
-        segment.end = boundary;
-        segment.rawText = _reading.substr(start, boundary - start);
+        segment.end = end;
+        segment.rawText = bunsetsu.reading;
 
         const LONG rawStart = RawCursorFromVisibleCursor(_rawInput, start, InputMode::Hiragana, converter);
-        const LONG rawEnd = RawCursorFromVisibleCursor(_rawInput, boundary, InputMode::Hiragana, converter);
+        const LONG rawEnd = RawCursorFromVisibleCursor(_rawInput, end, InputMode::Hiragana, converter);
         const std::wstring rawSegment = _rawInput.substr(rawStart, rawEnd - rawStart);
 
-        segment.candidates = kanaKanjiConverter.GenerateCandidates(
-            segment.rawText,
-            BuildPreeditText(rawSegment, InputMode::FullwidthKatakana, converter),
-            rawSegment,
-            ToFullwidth(rawSegment));
+        segment.candidates = bunsetsu.alternatives;
+        AppendUniqueCandidate(&segment.candidates, bunsetsu.surface);
+        AppendUniqueCandidate(&segment.candidates, segment.rawText);
+        AppendUniqueCandidate(&segment.candidates, BuildPreeditText(rawSegment, InputMode::FullwidthKatakana, converter));
+        AppendUniqueCandidate(&segment.candidates, rawSegment);
+        AppendUniqueCandidate(&segment.candidates, ToFullwidth(rawSegment));
 
         if (!segment.candidates.empty())
         {
-            segment.selectedCandidateIndex = 0;
-            segment.currentDisplayText = segment.candidates[0];
+            int selectedIndex = FindCandidateIndex(segment.candidates, bunsetsu.surface);
+            if (selectedIndex < 0)
+            {
+                selectedIndex = 0;
+            }
+
+            segment.selectedCandidateIndex = selectedIndex;
+            segment.currentDisplayText = segment.candidates[selectedIndex];
         }
         else
         {
             segment.selectedCandidateIndex = -1;
-            segment.currentDisplayText = segment.rawText;
+            segment.currentDisplayText = bunsetsu.surface;
         }
 
         session.segments.push_back(segment);
-        start = boundary;
     }
 
     if (session.segments.empty())
@@ -298,7 +351,6 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
         return false;
     }
 
-    UNREFERENCED_PARAMETER(readingCaret);
     session.focusedSegmentIndex = -1;
     _conversionSession = session;
     _phase = CompositionPhase::Converting;

@@ -1,20 +1,25 @@
 #pragma once
 
+#include <memory>
+#include <cstdint>
 #include <string>
-#include <unordered_map>
 #include <vector>
+
+#include "ConversionTypes.h"
+
+class ILexicon;
+class LexiconRegistry;
 
 class KanaKanjiConverter
 {
 public:
     KanaKanjiConverter();
 
-    std::vector<std::wstring> GenerateCandidates(
-        const std::wstring& reading,
-        const std::wstring& katakana,
-        const std::wstring& halfwidthRoman,
-        const std::wstring& fullwidthRoman) const;
+    void AddLexicon(const std::shared_ptr<ILexicon>& lexicon);
+    ConversionResult Convert(const std::wstring& reading) const;
 
 private:
-    std::unordered_map<std::wstring, std::vector<std::wstring>> _dictionary;
+    std::shared_ptr<LexiconRegistry> _lexicons;
+    std::vector<std::int16_t> _connectionMatrix;
+    int _connectionDimension = 0;
 };
