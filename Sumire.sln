@@ -5,6 +5,12 @@ VisualStudioVersion = 18.0.11222.15
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sumite-Desktop", "Sumire.vcxproj", "{2A3A4292-D967-4AE6-8640-322520186C9C}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SumireSettings", "SumireSettings.vcxproj", "{E11D9C1E-E364-4BA3-9875-1C7D56E75647}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SumireInstaller", "SumireInstaller.vcxproj", "{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SumireUninstaller", "SumireUninstaller.vcxproj", "{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +27,30 @@ Global
 		{2A3A4292-D967-4AE6-8640-322520186C9C}.Release|x64.Build.0 = Release|x64
 		{2A3A4292-D967-4AE6-8640-322520186C9C}.Release|x86.ActiveCfg = Release|Win32
 		{2A3A4292-D967-4AE6-8640-322520186C9C}.Release|x86.Build.0 = Release|Win32
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Debug|x64.ActiveCfg = Debug|x64
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Debug|x64.Build.0 = Debug|x64
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Debug|x86.ActiveCfg = Debug|Win32
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Debug|x86.Build.0 = Debug|Win32
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Release|x64.ActiveCfg = Release|x64
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Release|x64.Build.0 = Release|x64
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Release|x86.ActiveCfg = Release|Win32
+		{E11D9C1E-E364-4BA3-9875-1C7D56E75647}.Release|x86.Build.0 = Release|Win32
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Debug|x64.ActiveCfg = Debug|x64
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Debug|x64.Build.0 = Debug|x64
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Debug|x86.ActiveCfg = Debug|Win32
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Debug|x86.Build.0 = Debug|Win32
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Release|x64.ActiveCfg = Release|x64
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Release|x64.Build.0 = Release|x64
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Release|x86.ActiveCfg = Release|Win32
+		{9304CA2B-CB08-4843-96A9-D8DBB278EDB4}.Release|x86.Build.0 = Release|Win32
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Debug|x64.ActiveCfg = Debug|x64
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Debug|x64.Build.0 = Debug|x64
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Debug|x86.ActiveCfg = Debug|Win32
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Debug|x86.Build.0 = Debug|Win32
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Release|x64.ActiveCfg = Release|x64
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Release|x64.Build.0 = Release|x64
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Release|x86.ActiveCfg = Release|Win32
+		{7E85AAFA-D2B2-4D6B-A0F4-EF46EC94B6B9}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

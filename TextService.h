@@ -146,6 +146,7 @@ public:
     InputMode GetEffectiveInputMode() const;
     void SetLiveConversionEnabled(BOOL enabled);
     BOOL IsLiveConversionEnabled() const;
+    int GetCandidatePageSize() const;
     BOOL HasInputScopeOverride() const;
     void SetInputScopeOverride(InputMode mode);
     void ClearInputScopeOverride();
@@ -182,6 +183,7 @@ private:
     void _QueueLiveConversionRequest(const std::wstring& reading);
     void _CancelLiveConversionRequests();
     bool _CanUseLiveConversionPreview() const;
+    void _ReloadSettings();
 
     // initialize and uninitialize ThreadMgrEventSink.
     BOOL _InitThreadMgrEventSink();
@@ -254,6 +256,7 @@ private:
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
+    int _candidatePageSize;
     BOOL _pendingAlphabeticShift;
     HWND _liveConversionWindow;
     std::thread _liveConversionWorker;

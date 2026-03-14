@@ -53,6 +53,10 @@ STDAPI CTextService::OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr)
 
 STDAPI CTextService::OnSetFocus(ITfDocumentMgr *pDocMgrFocus, ITfDocumentMgr *pDocMgrPrevFocus)
 {
+    UNREFERENCED_PARAMETER(pDocMgrPrevFocus);
+
+    _ReloadSettings();
+
     //
     // Whenever focus is changed, we initialize the TextEditSink.
     //

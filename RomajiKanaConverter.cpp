@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "Globals.h"
+#include "SumireSettingsStore.h"
 
 namespace
 {
@@ -438,6 +439,12 @@ std::vector<std::filesystem::path> GetRomajiMapFiles()
 {
     std::vector<std::filesystem::path> candidates;
 
+    const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    if (!settings.romajiMapPath.empty())
+    {
+        candidates.push_back(std::filesystem::path(settings.romajiMapPath));
+    }
+
     const std::wstring envPath = ReadEnvVar(L"SUMIRE_ROMAJI_MAP_PATH");
     if (!envPath.empty())
     {
@@ -727,7 +734,16 @@ int EffectiveConsumeLength(const std::wstring& key, const RomajiKanaConverter::M
 } // namespace
 
 RomajiKanaConverter::RomajiKanaConverter()
+    : m_maxKeyLength(1)
 {
+    ReloadFromSettings();
+}
+
+void RomajiKanaConverter::ReloadFromSettings()
+{
+    m_romajiToKana.clear();
+    m_loadedMapPath.clear();
+
     for (const std::filesystem::path& candidate : GetRomajiMapFiles())
     {
         Map loadedMap;

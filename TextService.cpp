@@ -16,6 +16,7 @@
 #include "CandidateList.h"
 #include "EditSession.h"
 #include "LanguageBar.h"
+#include "SumireSettingsStore.h"
 
 extern const GUID GUID_LBI_INPUTMODE;
 
@@ -165,6 +166,7 @@ CTextService::CTextService()
     //
     _compositionPhase = CompositionPhase::Idle;
     _liveConversionEnabled = TRUE;
+    _candidatePageSize = 9;
     _pendingAlphabeticShift = FALSE;
     _liveConversionWindow = NULL;
     _liveConversionWorkerRunning = false;
@@ -333,6 +335,7 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
+    _ReloadSettings();
 
     //
     // Initialize ThreadMgrEventSink.
@@ -537,6 +540,11 @@ BOOL CTextService::IsLiveConversionEnabled() const
     return _liveConversionEnabled;
 }
 
+int CTextService::GetCandidatePageSize() const
+{
+    return _candidatePageSize;
+}
+
 InputMode CTextService::_GetCompositionInputMode() const
 {
     if (_compositionState.IsAlphabeticPreeditActive())
@@ -695,6 +703,14 @@ bool CTextService::_CanUseLiveConversionPreview() const
         !_compositionState.Empty() &&
         !_compositionState.IsAlphabeticPreeditActive() &&
         GetEffectiveInputMode() == InputMode::Hiragana;
+}
+
+void CTextService::_ReloadSettings()
+{
+    const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    _liveConversionEnabled = settings.liveConversionEnabled ? TRUE : FALSE;
+    _candidatePageSize = settings.candidatePageSize;
+    _romajiConverter.ReloadFromSettings();
 }
 
 void CTextService::_ApplyCompletedLiveConversionPreview()
@@ -1225,7 +1241,7 @@ HRESULT CTextService::_SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext
 
 HRESULT CTextService::_SelectNextCandidatePage(TfEditCookie ec, ITfContext* pContext)
 {
-    if (!_compositionState.SelectCandidatePage(1, 9))
+    if (!_compositionState.SelectCandidatePage(1, _candidatePageSize))
     {
         return S_FALSE;
     }
@@ -1236,7 +1252,7 @@ HRESULT CTextService::_SelectNextCandidatePage(TfEditCookie ec, ITfContext* pCon
 
 HRESULT CTextService::_SelectPrevCandidatePage(TfEditCookie ec, ITfContext* pContext)
 {
-    if (!_compositionState.SelectCandidatePage(-1, 9))
+    if (!_compositionState.SelectCandidatePage(-1, _candidatePageSize))
     {
         return S_FALSE;
     }

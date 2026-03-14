@@ -33,6 +33,20 @@ const GUID c_guidCandUIElement = {
     {0xad, 0xed, 0xb4, 0x80, 0xfe, 0x18, 0xf8, 0xd0}
   };
 
+namespace
+{
+UINT GetEffectiveCandidatePageSize(const CTextService* textService)
+{
+    if (textService == nullptr)
+    {
+        return 9;
+    }
+
+    const int pageSize = textService->GetCandidatePageSize();
+    return static_cast<UINT>(pageSize > 0 ? pageSize : 9);
+}
+}
+
 //+---------------------------------------------------------------------------
 //
 // CGetCompositionEditSession
@@ -689,6 +703,7 @@ Exit:
 void CCandidateWindow::_InitList()
 {
     UINT i;
+    const UINT pageSize = _GetPageSize();
 
     for (i = 0; i < _uCandList; i++)
     {
@@ -717,10 +732,10 @@ void CCandidateWindow::_InitList()
         _arCandStr[i] = NULL;
     }
 
-    _uPageCnt = (_uCandList == 0) ? 0 : ((_uCandList - 1) / kCandidatePageSize) + 1;
+    _uPageCnt = (_uCandList == 0) ? 0 : ((_uCandList - 1) / pageSize) + 1;
     for (i = 0; i < _uPageCnt; i++)
     {
-        _arPageIndex[i] = i * kCandidatePageSize;
+        _arPageIndex[i] = i * pageSize;
     }
     for (; i < MAX_CAND_STR; i++)
     {
@@ -736,6 +751,11 @@ void CCandidateWindow::_InitList()
         TF_CLUIE_STRING |
         TF_CLUIE_PAGEINDEX |
         TF_CLUIE_CURRENTPAGE;
+}
+
+UINT CCandidateWindow::_GetPageSize() const
+{
+    return GetEffectiveCandidatePageSize(_pTextService);
 }
 
 //+---------------------------------------------------------------------------
@@ -983,9 +1003,10 @@ LRESULT CALLBACK CCandidateWindow::_WindowProc(HWND hwnd, UINT uMsg, WPARAM wPar
 
                     const int itemHeight = 20;
                     UINT currentPage = 0;
+                    const UINT pageSize = pThis->_GetPageSize();
                     pThis->GetCurrentPage(&currentPage);
                     const UINT pageStart = pThis->_arPageIndex[currentPage];
-                    const UINT pageEnd = min(pageStart + CCandidateWindow::kCandidatePageSize, pThis->_uCandList);
+                    const UINT pageEnd = min(pageStart + pageSize, pThis->_uCandList);
 
                     for (UINT i = pageStart; i < pageEnd; i++)
                     {

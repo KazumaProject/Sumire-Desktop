@@ -4,6 +4,7 @@
 STDAPI CTextService::OnSetThreadFocus()
 {
     DebugLog(L"[ThreadFocusSink] OnSetThreadFocus\r\n");
+    _ReloadSettings();
     _UpdateLanguageBar();
     return S_OK;
 }

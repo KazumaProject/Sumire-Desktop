@@ -15,6 +15,7 @@ public:
     };
 
     RomajiKanaConverter();
+    void ReloadFromSettings();
 
     // Converts raw romaji text into the hiragana surface text.
     std::wstring ConvertFromRaw(const std::wstring& raw) const;
