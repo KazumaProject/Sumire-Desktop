@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "ConversionTypes.h"
 #include "ComposingText.h"
 #include "InputModeState.h"
 
@@ -17,11 +18,38 @@ enum class CompositionPhase
     Composing = 1,
     Converting = 2,
     CandidateSelecting = 3,
+    RechunkSelecting = 4,
 };
 
 class CompositionState
 {
 public:
+    struct Segment;
+
+    struct CandidateItem
+    {
+        LONG start = 0;
+        LONG end = 0;
+        int startSegmentIndex = -1;
+        int endSegmentIndex = -1;
+        int sourceCandidateIndex = -1;
+        std::wstring reading;
+        std::wstring displayText;
+    };
+
+    struct RechunkOption
+    {
+        LONG readingStart = 0;
+        LONG readingEnd = 0;
+        int replaceSegmentStart = -1;
+        int replaceSegmentEnd = -1;
+        int sourceCandidateIndex = -1;
+        std::wstring reading;
+        std::wstring label;
+        std::wstring surfaceText;
+        std::vector<Segment> replacementSegments;
+    };
+
     struct Segment
     {
         LONG start = 0;
@@ -43,6 +71,11 @@ public:
     struct ConversionSession
     {
         std::vector<Segment> segments;
+        std::vector<ConversionCandidate> candidatePaths;
+        std::vector<CandidateItem> candidateItems;
+        std::vector<RechunkOption> rechunkOptions;
+        std::vector<std::wstring> rechunkLabels;
+        int selectedRechunkOptionIndex = -1;
         int focusedSegmentIndex = -1;
         LONG originalCaretPosition = 0;
     };
@@ -73,13 +106,19 @@ public:
     CompositionPhase GetPhase() const;
 
     const std::vector<std::wstring>& GetCandidates() const;
+    const std::vector<ConversionCandidate>& GetConversionCandidates() const;
+    const std::vector<CandidateItem>& GetCandidateItems() const;
+    const std::vector<RechunkOption>& GetRechunkOptions() const;
     bool StartConversion(const KanaKanjiConverter& kanaKanjiConverter, InputMode mode, const RomajiKanaConverter& converter);
     void EnterCandidateSelecting();
     bool BeginSegmentSelection();
+    bool BeginRechunkSelection(const RomajiKanaConverter& converter);
     bool SelectNextCandidate();
     bool SelectPrevCandidate();
     bool SelectFirstCandidate();
     bool SelectLastCandidate();
+    bool ApplySelectedRechunkOption();
+    bool CancelRechunkSelection();
     bool MoveFocusLeft();
     bool MoveFocusRight();
     bool CommitFocusedSegment();
@@ -110,7 +149,13 @@ private:
     int FindNextUncommittedSegment(int startIndex) const;
     Segment* GetFocusedSegment();
     const Segment* GetFocusedSegment() const;
+    RechunkOption* GetSelectedRechunkOption();
+    const RechunkOption* GetSelectedRechunkOption() const;
     void UpdateSegmentSelection(Segment& segment, int index);
+    void UpdateRechunkSelection(int index);
+    void UpdateBoundariesFromSegments();
+    std::vector<RechunkOption> BuildRechunkOptionsForFocusedSegment(const RomajiKanaConverter& converter) const;
+    Segment BuildSegmentFromBunsetsu(const BunsetsuConversion& bunsetsu, const RomajiKanaConverter& converter) const;
     void SyncLegacyBuffer();
     static std::wstring BuildPreeditText(const std::wstring& raw, InputMode mode, const RomajiKanaConverter& converter);
     static LONG RawCursorFromVisibleCursor(const std::wstring& raw, LONG visibleCursor, InputMode mode, const RomajiKanaConverter& converter);

@@ -1,439 +1,789 @@
-// RomajiKanaConverter.cpp
+Ôªø// RomajiKanaConverter.cpp
 #include "RomajiKanaConverter.h"
 
-namespace {
+#include <Windows.h>
 
-    // Kotlin ÇÃ getDefaultMapData Ç∆ìØÇ∂ì‡óeÇÃÉeÅ[ÉuÉã
-    std::unordered_map<std::wstring, RomajiKanaConverter::MapEntry> CreateDefaultMap()
+#include <algorithm>
+#include <cwctype>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <sstream>
+#include <string>
+#include <system_error>
+#include <vector>
+
+#include "Globals.h"
+
+namespace
+{
+using Map = std::unordered_map<std::wstring, RomajiKanaConverter::MapEntry>;
+
+const char* kDefaultMapTsv = u8R"(# romaji	kana	[pending]
+-	„Éº
+~	„Äú
+.	„ÄÇ
+,	„ÄÅ
+z/	„Éª
+z.	‚Ä¶
+z,	‚Ä•
+zh	‚Üê
+zj	‚Üì
+zk	‚Üë
+zl	‚Üí
+z-	„Äú
+z[	„Äé
+z]	„Äè
+[	„Äå
+]	„Äç
+va	„Çî„ÅÅ
+vi	„Çî„ÅÉ
+vu	„Çî
+ve	„Çî„Åá
+vo	„Çî„Åâ
+vya	„Çî„ÇÉ
+vyi	„Çî„ÅÉ
+vyu	„Çî„ÇÖ
+vye	„Çî„Åá
+vyo	„Çî„Çá
+qq	„Å£	q
+vv	„Å£	v
+ll	„Å£	l
+xx	„Å£	x
+kk	„Å£	k
+gg	„Å£	g
+ss	„Å£	s
+zz	„Å£	z
+jj	„Å£	j
+tt	„Å£	t
+tch	„Å£	ch
+dd	„Å£	d
+hh	„Å£	h
+ff	„Å£	f
+bb	„Å£	b
+pp	„Å£	p
+mm	„Å£	m
+yy	„Å£	y
+rr	„Å£	r
+ww	„Å£	w
+www	w	ww
+cc	„Å£	c
+kya	„Åç„ÇÉ
+kyi	„Åç„ÅÉ
+kyu	„Åç„ÇÖ
+kye	„Åç„Åá
+kyo	„Åç„Çá
+gya	„Åé„ÇÉ
+gyi	„Åé„ÅÉ
+gyu	„Åé„ÇÖ
+gye	„Åé„Åá
+gyo	„Åé„Çá
+sya	„Åó„ÇÉ
+syi	„Åó„ÅÉ
+syu	„Åó„ÇÖ
+sye	„Åó„Åá
+syo	„Åó„Çá
+sha	„Åó„ÇÉ
+shi	„Åó
+shu	„Åó„ÇÖ
+she	„Åó„Åá
+sho	„Åó„Çá
+zya	„Åò„ÇÉ
+zyi	„Åò„ÅÉ
+zyu	„Åò„ÇÖ
+zye	„Åò„Åá
+zyo	„Åò„Çá
+tya	„Å°„ÇÉ
+tyi	„Å°„ÅÉ
+tyu	„Å°„ÇÖ
+tye	„Å°„Åá
+tyo	„Å°„Çá
+cha	„Å°„ÇÉ
+chi	„Å°
+chu	„Å°„ÇÖ
+che	„Å°„Åá
+cho	„Å°„Çá
+cya	„Å°„ÇÉ
+cyi	„Å°„ÅÉ
+cyu	„Å°„ÇÖ
+cye	„Å°„Åá
+cyo	„Å°„Çá
+dya	„Å¢„ÇÉ
+dyi	„Å¢„ÅÉ
+dyu	„Å¢„ÇÖ
+dye	„Å¢„Åá
+dyo	„Å¢„Çá
+tsa	„Å§„ÅÅ
+tsi	„Å§„ÅÉ
+tse	„Å§„Åá
+tso	„Å§„Åâ
+tha	„Å¶„ÇÉ
+thi	„Å¶„ÅÉ
+t'i	„Å¶„ÅÉ
+thu	„Å¶„ÇÖ
+the	„Å¶„Åá
+tho	„Å¶„Çá
+t'yu	„Å¶„ÇÖ
+dha	„Åß„ÇÉ
+dhi	„Åß„ÅÉ
+d'i	„Åß„ÅÉ
+dhu	„Åß„ÇÖ
+dhe	„Åß„Åá
+dho	„Åß„Çá
+d'yu	„Åß„ÇÖ
+twa	„Å®„ÅÅ
+twi	„Å®„ÅÉ
+twu	„Å®„ÅÖ
+twe	„Å®„Åá
+two	„Å®„Åâ
+t'u	„Å®„ÅÖ
+dwa	„Å©„ÅÅ
+dwi	„Å©„ÅÉ
+dwu	„Å©„ÅÖ
+dwe	„Å©„Åá
+dwo	„Å©„Åâ
+d'u	„Å©„ÅÖ
+nya	„Å´„ÇÉ
+nyi	„Å´„ÅÉ
+nyu	„Å´„ÇÖ
+nye	„Å´„Åá
+nyo	„Å´„Çá
+hya	„Å≤„ÇÉ
+hyi	„Å≤„ÅÉ
+hyu	„Å≤„ÇÖ
+hye	„Å≤„Åá
+hyo	„Å≤„Çá
+bya	„Å≥„ÇÉ
+byi	„Å≥„ÅÉ
+byu	„Å≥„ÇÖ
+bye	„Å≥„Åá
+byo	„Å≥„Çá
+pya	„Å¥„ÇÉ
+pyi	„Å¥„ÅÉ
+pyu	„Å¥„ÇÖ
+pye	„Å¥„Åá
+pyo	„Å¥„Çá
+fa	„Åµ„ÅÅ
+fi	„Åµ„ÅÉ
+fu	„Åµ
+fe	„Åµ„Åá
+fo	„Åµ„Åâ
+fya	„Åµ„ÇÉ
+fyu	„Åµ„ÇÖ
+fyo	„Åµ„Çá
+hwa	„Åµ„ÅÅ
+hwi	„Åµ„ÅÉ
+hwe	„Åµ„Åá
+hwo	„Åµ„Åâ
+hwyu	„Åµ„ÇÖ
+mya	„Åø„ÇÉ
+myi	„Åø„ÅÉ
+myu	„Åø„ÇÖ
+mye	„Åø„Åá
+myo	„Åø„Çá
+rya	„Çä„ÇÉ
+ryi	„Çä„ÅÉ
+ryu	„Çä„ÇÖ
+rye	„Çä„Åá
+ryo	„Çä„Çá
+n'	„Çì
+nn	„Çì
+n	„Çì
+xn	„Çì
+a	„ÅÇ
+i	„ÅÑ
+u	„ÅÜ
+wu	„ÅÜ
+e	„Åà
+o	„Åä
+xa	„ÅÅ
+xi	„ÅÉ
+xu	„ÅÖ
+xe	„Åá
+xo	„Åâ
+la	„ÅÅ
+li	„ÅÉ
+lu	„ÅÖ
+le	„Åá
+lo	„Åâ
+lyi	„ÅÉ
+xyi	„ÅÉ
+lye	„Åá
+xye	„Åá
+ye	„ÅÑ„Åá
+ka	„Åã
+ki	„Åç
+ku	„Åè
+ke	„Åë
+ko	„Åì
+xka	„Éµ
+xke	„É∂
+lka	„Éµ
+lke	„É∂
+ga	„Åå
+gi	„Åé
+gu	„Åê
+ge	„Åí
+go	„Åî
+sa	„Åï
+si	„Åó
+su	„Åô
+se	„Åõ
+so	„Åù
+ca	„Åã
+ci	„Åó
+cu	„Åè
+ce	„Åõ
+co	„Åì
+qa	„Åè„ÅÅ
+qi	„Åè„ÅÉ
+qu	„Åè
+qe	„Åè„Åá
+qo	„Åè„Åâ
+kwa	„Åè„ÅÅ
+kwi	„Åè„ÅÉ
+kwu	„Åè„ÅÖ
+kwe	„Åè„Åá
+kwo	„Åè„Åâ
+gwa	„Åê„ÅÅ
+gwi	„Åê„ÅÉ
+gwu	„Åê„ÅÖ
+gwe	„Åê„Åá
+gwo	„Åê„Åâ
+swa	„Åô„ÅÅ
+swi	„Åô„ÅÉ
+swu	„Åô„ÅÖ
+swe	„Åô„Åá
+swo	„Åô„Åâ
+zwa	„Åö„ÅÅ
+zwi	„Åö„ÅÉ
+zwu	„Åö„ÅÖ
+zwe	„Åö„Åá
+zwo	„Åö„Åâ
+za	„Åñ
+zi	„Åò
+zu	„Åö
+ze	„Åú
+zo	„Åû
+ja	„Åò„ÇÉ
+ji	„Åò
+ju	„Åò„ÇÖ
+je	„Åò„Åá
+jo	„Åò„Çá
+jya	„Åò„ÇÉ
+jyi	„Åò„ÅÉ
+jyu	„Åò„ÇÖ
+jye	„Åò„Åá
+jyo	„Åò„Çá
+ta	„Åü
+ti	„Å°
+tu	„Å§
+tsu	„Å§
+te	„Å¶
+to	„Å®
+da	„Å†
+di	„Å¢
+du	„Å•
+de	„Åß
+do	„Å©
+xtu	„Å£
+xtsu	„Å£
+ltu	„Å£
+ltsu	„Å£
+na	„Å™
+ni	„Å´
+nu	„Å¨
+ne	„Å≠
+no	„ÅÆ
+ha	„ÅØ
+hi	„Å≤
+hu	„Åµ
+he	„Å∏
+ho	„Åª
+ba	„Å∞
+bi	„Å≥
+bu	„Å∂
+be	„Åπ
+bo	„Åº
+pa	„Å±
+pi	„Å¥
+pu	„Å∑
+pe	„Å∫
+po	„ÅΩ
+ma	„Åæ
+mi	„Åø
+mu	„ÇÄ
+me	„ÇÅ
+mo	„ÇÇ
+xya	„ÇÉ
+lya	„ÇÉ
+ya	„ÇÑ
+wyi	„Çê
+xyu	„ÇÖ
+lyu	„ÇÖ
+yu	„ÇÜ
+wye	„Çë
+xyo	„Çá
+lyo	„Çá
+yo	„Çà
+ra	„Çâ
+ri	„Çä
+ru	„Çã
+re	„Çå
+ro	„Çç
+xwa	„Çé
+lwa	„Çé
+wa	„Çè
+wi	„ÅÜ„ÅÉ
+we	„ÅÜ„Åá
+wo	„Çí
+wha	„ÅÜ„ÅÅ
+whi	„ÅÜ„ÅÉ
+whu	„ÅÜ
+whe	„ÅÜ„Åá
+who	„ÅÜ„Åâ
+)";
+
+std::wstring ReadEnvVar(const wchar_t* name)
+{
+    size_t required = 0;
+    _wgetenv_s(&required, nullptr, 0, name);
+    if (required == 0)
     {
-        using Entry = RomajiKanaConverter::MapEntry;
-        std::unordered_map<std::wstring, Entry> m;
-
-        // punctuation / symbols
-        m.emplace(L"-", Entry{ L"Å[", 1 });
-        m.emplace(L"~", Entry{ L"?", 1 });
-        m.emplace(L".", Entry{ L"ÅB", 1 });
-        m.emplace(L",", Entry{ L"ÅA", 1 });
-        m.emplace(L"z/", Entry{ L"ÅE", 2 });
-        m.emplace(L"z.", Entry{ L"Åc", 2 });
-        m.emplace(L"z,", Entry{ L"Åd", 2 });
-        m.emplace(L"zh", Entry{ L"Å©", 2 });
-        m.emplace(L"zj", Entry{ L"Å´", 2 });
-        m.emplace(L"zk", Entry{ L"Å™", 2 });
-        m.emplace(L"zl", Entry{ L"Å®", 2 });
-        m.emplace(L"z-", Entry{ L"?", 2 });
-        m.emplace(L"z[", Entry{ L"Åw", 2 });
-        m.emplace(L"z]", Entry{ L"Åx", 2 });
-        m.emplace(L"[", Entry{ L"Åu", 1 });
-        m.emplace(L"]", Entry{ L"Åv", 1 });
-
-        // v-row
-        m.emplace(L"va", Entry{ L"?Çü", 2 });
-        m.emplace(L"vi", Entry{ L"?Ç°", 2 });
-        m.emplace(L"vu", Entry{ L"?",   2 });
-        m.emplace(L"ve", Entry{ L"?Ç•", 2 });
-        m.emplace(L"vo", Entry{ L"?Çß", 2 });
-        m.emplace(L"vya", Entry{ L"?Ç·", 3 });
-        m.emplace(L"vyi", Entry{ L"?Ç°", 3 });
-        m.emplace(L"vyu", Entry{ L"?Ç„", 3 });
-        m.emplace(L"vye", Entry{ L"?Ç•", 3 });
-        m.emplace(L"vyo", Entry{ L"?ÇÂ", 3 });
-
-        // gemination (small tsu + consonant)
-        m.emplace(L"qq", Entry{ L"Ç¡", 2 });
-        m.emplace(L"vv", Entry{ L"Ç¡", 2 });
-        m.emplace(L"ll", Entry{ L"Ç¡", 2 });
-        m.emplace(L"xx", Entry{ L"Ç¡", 2 });
-        m.emplace(L"kk", Entry{ L"Ç¡", 2 });
-        m.emplace(L"gg", Entry{ L"Ç¡", 2 });
-        m.emplace(L"ss", Entry{ L"Ç¡", 2 });
-        m.emplace(L"zz", Entry{ L"Ç¡", 2 });
-        m.emplace(L"jj", Entry{ L"Ç¡", 2 });
-        m.emplace(L"tt", Entry{ L"Ç¡", 2 });
-        m.emplace(L"tch", Entry{ L"Ç¡", 3 });
-        m.emplace(L"dd", Entry{ L"Ç¡", 2 });
-        m.emplace(L"hh", Entry{ L"Ç¡", 2 });
-        m.emplace(L"ff", Entry{ L"Ç¡", 2 });
-        m.emplace(L"bb", Entry{ L"Ç¡", 2 });
-        m.emplace(L"pp", Entry{ L"Ç¡", 2 });
-        m.emplace(L"mm", Entry{ L"Ç¡", 2 });
-        m.emplace(L"yy", Entry{ L"Ç¡", 2 });
-        m.emplace(L"rr", Entry{ L"Ç¡", 2 });
-        m.emplace(L"ww", Entry{ L"Ç¡", 2 });
-        m.emplace(L"www", Entry{ L"www", 3 });
-        m.emplace(L"cc", Entry{ L"Ç¡", 2 });
-
-        // k-row youon
-        m.emplace(L"kya", Entry{ L"Ç´Ç·", 3 });
-        m.emplace(L"kyi", Entry{ L"Ç´Ç°", 3 });
-        m.emplace(L"kyu", Entry{ L"Ç´Ç„", 3 });
-        m.emplace(L"kye", Entry{ L"Ç´Ç•", 3 });
-        m.emplace(L"kyo", Entry{ L"Ç´ÇÂ", 3 });
-
-        // g-row youon
-        m.emplace(L"gya", Entry{ L"Ç¨Ç·", 3 });
-        m.emplace(L"gyi", Entry{ L"Ç¨Ç°", 3 });
-        m.emplace(L"gyu", Entry{ L"Ç¨Ç„", 3 });
-        m.emplace(L"gye", Entry{ L"Ç¨Ç•", 3 });
-        m.emplace(L"gyo", Entry{ L"Ç¨ÇÂ", 3 });
-
-        // s-row
-        m.emplace(L"sya", Entry{ L"ÇµÇ·", 3 });
-        m.emplace(L"syi", Entry{ L"ÇµÇ°", 3 });
-        m.emplace(L"syu", Entry{ L"ÇµÇ„", 3 });
-        m.emplace(L"sye", Entry{ L"ÇµÇ•", 3 });
-        m.emplace(L"syo", Entry{ L"ÇµÇÂ", 3 });
-        m.emplace(L"sha", Entry{ L"ÇµÇ·", 3 });
-        m.emplace(L"shi", Entry{ L"Çµ",   3 });
-        m.emplace(L"shu", Entry{ L"ÇµÇ„", 3 });
-        m.emplace(L"she", Entry{ L"ÇµÇ•", 3 });
-        m.emplace(L"sho", Entry{ L"ÇµÇÂ", 3 });
-
-        // n-row
-        m.emplace(L"na", Entry{ L"Ç»", 2 });
-        m.emplace(L"ni", Entry{ L"Ç…", 2 });
-        m.emplace(L"nu", Entry{ L"Ç ", 2 });
-        m.emplace(L"ne", Entry{ L"ÇÀ", 2 });
-        m.emplace(L"no", Entry{ L"ÇÃ", 2 });
-
-        // k-row
-        m.emplace(L"ca", Entry{ L"Ç©", 2 });
-        m.emplace(L"ka", Entry{ L"Ç©", 2 });
-        m.emplace(L"ki", Entry{ L"Ç´", 2 });
-        m.emplace(L"ku", Entry{ L"Ç≠", 2 });
-        m.emplace(L"ke", Entry{ L"ÇØ", 2 });
-        m.emplace(L"ko", Entry{ L"Ç±", 2 });
-
-        // s-row basic
-        m.emplace(L"sa", Entry{ L"Ç≥", 2 });
-        m.emplace(L"si", Entry{ L"Çµ", 2 });
-        m.emplace(L"su", Entry{ L"Ç∑", 2 });
-        m.emplace(L"se", Entry{ L"Çπ", 2 });
-        m.emplace(L"so", Entry{ L"Çª", 2 });
-
-        // g-row basic
-        m.emplace(L"ga", Entry{ L"Ç™", 2 });
-        m.emplace(L"gi", Entry{ L"Ç¨", 2 });
-        m.emplace(L"gu", Entry{ L"ÇÆ", 2 });
-        m.emplace(L"ge", Entry{ L"Ç∞", 2 });
-        m.emplace(L"go", Entry{ L"Ç≤", 2 });
-
-        // z-row
-        m.emplace(L"zya", Entry{ L"Ç∂Ç·", 3 });
-        m.emplace(L"zyi", Entry{ L"Ç∂Ç°", 3 });
-        m.emplace(L"zyu", Entry{ L"Ç∂Ç„", 3 });
-        m.emplace(L"zye", Entry{ L"Ç∂Ç•", 3 });
-        m.emplace(L"zyo", Entry{ L"Ç∂ÇÂ", 3 });
-        m.emplace(L"za", Entry{ L"Ç¥",  2 });
-        m.emplace(L"zi", Entry{ L"Ç∂",  2 });
-        m.emplace(L"zu", Entry{ L"Ç∏",  2 });
-        m.emplace(L"ze", Entry{ L"Ç∫",  2 });
-        m.emplace(L"zo", Entry{ L"Çº",  2 });
-
-        m.emplace(L"jya", Entry{ L"Ç∂Ç·", 3 });
-        m.emplace(L"jyi", Entry{ L"Ç∂Ç°", 3 });
-        m.emplace(L"jyu", Entry{ L"Ç∂Ç„", 3 });
-        m.emplace(L"jye", Entry{ L"Ç∂Ç•", 3 });
-        m.emplace(L"jyo", Entry{ L"Ç∂ÇÂ", 3 });
-        m.emplace(L"ja", Entry{ L"Ç∂Ç·", 2 });
-        m.emplace(L"ji", Entry{ L"Ç∂",   2 });
-        m.emplace(L"ju", Entry{ L"Ç∂Ç„", 2 });
-        m.emplace(L"je", Entry{ L"Ç∂Ç•", 2 });
-        m.emplace(L"jo", Entry{ L"Ç∂ÇÂ", 2 });
-
-        // t-row youon & variants
-        m.emplace(L"tya", Entry{ L"ÇøÇ·", 3 });
-        m.emplace(L"tyi", Entry{ L"ÇøÇ°", 3 });
-        m.emplace(L"tyu", Entry{ L"ÇøÇ„", 3 });
-        m.emplace(L"tye", Entry{ L"ÇøÇ•", 3 });
-        m.emplace(L"tyo", Entry{ L"ÇøÇÂ", 3 });
-        m.emplace(L"cha", Entry{ L"ÇøÇ·", 3 });
-        m.emplace(L"chi", Entry{ L"Çø",   3 });
-        m.emplace(L"chu", Entry{ L"ÇøÇ„", 3 });
-        m.emplace(L"che", Entry{ L"ÇøÇ•", 3 });
-        m.emplace(L"cho", Entry{ L"ÇøÇÂ", 3 });
-        m.emplace(L"cya", Entry{ L"ÇøÇ·", 3 });
-        m.emplace(L"cyi", Entry{ L"ÇøÇ°", 3 });
-        m.emplace(L"cyu", Entry{ L"ÇøÇ„", 3 });
-        m.emplace(L"cye", Entry{ L"ÇøÇ•", 3 });
-        m.emplace(L"cyo", Entry{ L"ÇøÇÂ", 3 });
-
-        m.emplace(L"ta", Entry{ L"ÇΩ", 2 });
-        m.emplace(L"ti", Entry{ L"Çø", 2 });
-        m.emplace(L"tu", Entry{ L"Ç¬", 2 });
-        m.emplace(L"tsu", Entry{ L"Ç¬", 3 });
-        m.emplace(L"te", Entry{ L"Çƒ", 2 });
-        m.emplace(L"to", Entry{ L"Ç∆", 2 });
-
-        // d-row youon & variants
-        m.emplace(L"dya", Entry{ L"Ç¿Ç·", 3 });
-        m.emplace(L"dyi", Entry{ L"Ç¿Ç°", 3 });
-        m.emplace(L"dyu", Entry{ L"Ç¿Ç„", 3 });
-        m.emplace(L"dye", Entry{ L"Ç¿Ç•", 3 });
-        m.emplace(L"dyo", Entry{ L"Ç¿ÇÂ", 3 });
-        m.emplace(L"da", Entry{ L"Çæ",   2 });
-        m.emplace(L"di", Entry{ L"Ç¿",   2 });
-        m.emplace(L"du", Entry{ L"Ç√",   2 });
-        m.emplace(L"de", Entry{ L"Ç≈",   2 });
-        m.emplace(L"do", Entry{ L"Ç«",   2 });
-
-        // de-y variants
-        m.emplace(L"dha", Entry{ L"Ç≈Ç·", 3 });
-        m.emplace(L"dhi", Entry{ L"Ç≈Ç°", 3 });
-        m.emplace(L"d'i", Entry{ L"Ç≈Ç°", 3 });
-        m.emplace(L"dhu", Entry{ L"Ç≈Ç„", 3 });
-        m.emplace(L"dhe", Entry{ L"Ç≈Ç•", 3 });
-        m.emplace(L"dho", Entry{ L"Ç≈ÇÂ", 3 });
-        m.emplace(L"d'yu", Entry{ L"Ç≈Ç„", 4 });
-
-        // t-h variants
-        m.emplace(L"tha", Entry{ L"ÇƒÇ·", 3 });
-        m.emplace(L"thi", Entry{ L"ÇƒÇ°", 3 });
-        m.emplace(L"t'i", Entry{ L"ÇƒÇ°", 3 });
-        m.emplace(L"thu", Entry{ L"ÇƒÇ„", 3 });
-        m.emplace(L"the", Entry{ L"ÇƒÇ•", 3 });
-        m.emplace(L"tho", Entry{ L"ÇƒÇÂ", 3 });
-        m.emplace(L"t'yu", Entry{ L"ÇƒÇ„", 4 });
-
-        // t-w variants
-        m.emplace(L"twa", Entry{ L"Ç∆Çü", 3 });
-        m.emplace(L"twi", Entry{ L"Ç∆Ç°", 3 });
-        m.emplace(L"twu", Entry{ L"Ç∆Ç£", 3 });
-        m.emplace(L"twe", Entry{ L"Ç∆Ç•", 3 });
-        m.emplace(L"two", Entry{ L"Ç∆Çß", 3 });
-        m.emplace(L"t'u", Entry{ L"Ç∆Ç£", 3 });
-
-        // d-w variants
-        m.emplace(L"dwa", Entry{ L"Ç«Çü", 3 });
-        m.emplace(L"dwi", Entry{ L"Ç«Ç°", 3 });
-        m.emplace(L"dwu", Entry{ L"Ç«Ç£", 3 });
-        m.emplace(L"dwe", Entry{ L"Ç«Ç•", 3 });
-        m.emplace(L"dwo", Entry{ L"Ç«Çß", 3 });
-        m.emplace(L"d'u", Entry{ L"Ç«Ç£", 3 });
-
-        // n-row youon & n variants
-        m.emplace(L"nya", Entry{ L"Ç…Ç·", 3 });
-        m.emplace(L"nyi", Entry{ L"Ç…Ç°", 3 });
-        m.emplace(L"nyu", Entry{ L"Ç…Ç„", 3 });
-        m.emplace(L"nye", Entry{ L"Ç…Ç•", 3 });
-        m.emplace(L"nyo", Entry{ L"Ç…ÇÂ", 3 });
-        m.emplace(L"nn", Entry{ L"ÇÒ",   2 });
-        m.emplace(L"xn", Entry{ L"ÇÒ",   2 });
-
-        // h-row youon & variants
-        m.emplace(L"hya", Entry{ L"Ç–Ç·", 3 });
-        m.emplace(L"hyi", Entry{ L"Ç–Ç°", 3 });
-        m.emplace(L"hyu", Entry{ L"Ç–Ç„", 3 });
-        m.emplace(L"hye", Entry{ L"Ç–Ç•", 3 });
-        m.emplace(L"hyo", Entry{ L"Ç–ÇÂ", 3 });
-        m.emplace(L"ha", Entry{ L"ÇÕ",   2 });
-        m.emplace(L"hi", Entry{ L"Ç–",   2 });
-        m.emplace(L"hu", Entry{ L"Ç”",   2 });
-        m.emplace(L"fu", Entry{ L"Ç”",   2 });
-        m.emplace(L"he", Entry{ L"Ç÷",   2 });
-        m.emplace(L"ho", Entry{ L"ÇŸ",   2 });
-
-        // b-row youon
-        m.emplace(L"bya", Entry{ L"Ç—Ç·", 3 });
-        m.emplace(L"byi", Entry{ L"Ç—Ç°", 3 });
-        m.emplace(L"byu", Entry{ L"Ç—Ç„", 3 });
-        m.emplace(L"bye", Entry{ L"Ç—Ç•", 3 });
-        m.emplace(L"byo", Entry{ L"Ç—ÇÂ", 3 });
-        m.emplace(L"ba", Entry{ L"ÇŒ",   2 });
-        m.emplace(L"bi", Entry{ L"Ç—",   2 });
-        m.emplace(L"bu", Entry{ L"Ç‘",   2 });
-        m.emplace(L"be", Entry{ L"Ç◊",   2 });
-        m.emplace(L"bo", Entry{ L"Ç⁄",   2 });
-
-        // p-row youon
-        m.emplace(L"pya", Entry{ L"Ç“Ç·", 3 });
-        m.emplace(L"pyi", Entry{ L"Ç“Ç°", 3 });
-        m.emplace(L"pyu", Entry{ L"Ç“Ç„", 3 });
-        m.emplace(L"pye", Entry{ L"Ç“Ç•", 3 });
-        m.emplace(L"pyo", Entry{ L"Ç“ÇÂ", 3 });
-        m.emplace(L"pa", Entry{ L"Çœ",   2 });
-        m.emplace(L"pi", Entry{ L"Ç“",   2 });
-        m.emplace(L"pu", Entry{ L"Ç’",   2 });
-        m.emplace(L"pe", Entry{ L"Çÿ",   2 });
-        m.emplace(L"po", Entry{ L"Ç€",   2 });
-
-        // f-variants & youon
-        m.emplace(L"fa", Entry{ L"Ç”Çü", 2 });
-        m.emplace(L"fi", Entry{ L"Ç”Ç°", 2 });
-        m.emplace(L"fe", Entry{ L"Ç”Ç•", 2 });
-        m.emplace(L"fo", Entry{ L"Ç”Çß", 2 });
-        m.emplace(L"fya", Entry{ L"Ç”Ç·", 3 });
-        m.emplace(L"fyu", Entry{ L"Ç”Ç„", 3 });
-        m.emplace(L"fyo", Entry{ L"Ç”ÇÂ", 3 });
-        m.emplace(L"hwa", Entry{ L"Ç”Çü", 3 });
-        m.emplace(L"hwi", Entry{ L"Ç”Ç°", 3 });
-        m.emplace(L"hwe", Entry{ L"Ç”Ç•", 3 });
-        m.emplace(L"hwo", Entry{ L"Ç”Çß", 3 });
-        m.emplace(L"hwyu", Entry{ L"Ç”Ç„", 4 });
-
-        // m-row youon
-        m.emplace(L"mya", Entry{ L"Ç›Ç·", 3 });
-        m.emplace(L"myi", Entry{ L"Ç›Ç°", 3 });
-        m.emplace(L"myu", Entry{ L"Ç›Ç„", 3 });
-        m.emplace(L"mye", Entry{ L"Ç›Ç•", 3 });
-        m.emplace(L"myo", Entry{ L"Ç›ÇÂ", 3 });
-        m.emplace(L"ma", Entry{ L"Ç‹",   2 });
-        m.emplace(L"mi", Entry{ L"Ç›",   2 });
-        m.emplace(L"mu", Entry{ L"Çﬁ",   2 });
-        m.emplace(L"me", Entry{ L"Çﬂ",   2 });
-        m.emplace(L"mo", Entry{ L"Ç‡",   2 });
-
-        // y-row
-        m.emplace(L"xya", Entry{ L"Ç·",   3 });
-        m.emplace(L"lya", Entry{ L"Ç·",   3 });
-        m.emplace(L"ya", Entry{ L"Ç‚",   2 });
-        m.emplace(L"wyi", Entry{ L"ÇÓ",   3 });
-        m.emplace(L"xyu", Entry{ L"Ç„",   3 });
-        m.emplace(L"lyu", Entry{ L"Ç„",   3 });
-        m.emplace(L"yu", Entry{ L"Ç‰",   2 });
-        m.emplace(L"wye", Entry{ L"ÇÔ",   3 });
-        m.emplace(L"xyo", Entry{ L"ÇÂ",   3 });
-        m.emplace(L"lyo", Entry{ L"ÇÂ",   3 });
-        m.emplace(L"yo", Entry{ L"ÇÊ",   2 });
-
-        // r-row youon
-        m.emplace(L"rya", Entry{ L"ÇËÇ·", 3 });
-        m.emplace(L"ryi", Entry{ L"ÇËÇ°", 3 });
-        m.emplace(L"ryu", Entry{ L"ÇËÇ„", 3 });
-        m.emplace(L"rye", Entry{ L"ÇËÇ•", 3 });
-        m.emplace(L"ryo", Entry{ L"ÇËÇÂ", 3 });
-        m.emplace(L"ra", Entry{ L"ÇÁ",   2 });
-        m.emplace(L"ri", Entry{ L"ÇË",   2 });
-        m.emplace(L"ru", Entry{ L"ÇÈ",   2 });
-        m.emplace(L"re", Entry{ L"ÇÍ",   2 });
-        m.emplace(L"ro", Entry{ L"ÇÎ",   2 });
-
-        // w-row & variants
-        m.emplace(L"xwa", Entry{ L"ÇÏ",   3 });
-        m.emplace(L"lwa", Entry{ L"ÇÏ",   3 });
-        m.emplace(L"wa", Entry{ L"ÇÌ",   2 });
-        m.emplace(L"wi", Entry{ L"Ç§Ç°", 2 });
-        m.emplace(L"we", Entry{ L"Ç§Ç•", 2 });
-        m.emplace(L"wo", Entry{ L"Ç",   2 });
-        m.emplace(L"wha", Entry{ L"Ç§Çü", 3 });
-        m.emplace(L"whi", Entry{ L"Ç§Ç°", 3 });
-        m.emplace(L"whu", Entry{ L"Ç§",   3 });
-        m.emplace(L"whe", Entry{ L"Ç§Ç•", 3 });
-        m.emplace(L"who", Entry{ L"Ç§Çß", 3 });
-
-        // basic vowels
-        m.emplace(L"a", Entry{ L"Ç†", 1 });
-        m.emplace(L"i", Entry{ L"Ç¢", 1 });
-        m.emplace(L"u", Entry{ L"Ç§", 1 });
-        m.emplace(L"wu", Entry{ L"Ç§", 2 });
-        m.emplace(L"e", Entry{ L"Ç¶", 1 });
-        m.emplace(L"o", Entry{ L"Ç®", 1 });
-
-        // small vowels
-        m.emplace(L"xa", Entry{ L"Çü", 2 });
-        m.emplace(L"xi", Entry{ L"Ç°", 2 });
-        m.emplace(L"xu", Entry{ L"Ç£", 2 });
-        m.emplace(L"xe", Entry{ L"Ç•", 2 });
-        m.emplace(L"xo", Entry{ L"Çß", 2 });
-        m.emplace(L"la", Entry{ L"Çü", 2 });
-        m.emplace(L"li", Entry{ L"Ç°", 2 });
-        m.emplace(L"lu", Entry{ L"Ç£", 2 });
-        m.emplace(L"le", Entry{ L"Ç•", 2 });
-        m.emplace(L"lo", Entry{ L"Çß", 2 });
-        m.emplace(L"lyi", Entry{ L"Ç°", 3 });
-        m.emplace(L"xyi", Entry{ L"Ç°", 3 });
-        m.emplace(L"lye", Entry{ L"Ç•", 3 });
-        m.emplace(L"xye", Entry{ L"Ç•", 3 });
-        m.emplace(L"ye", Entry{ L"Ç¢Ç•", 2 });
-
-        // x-row small kana
-        m.emplace(L"xka", Entry{ L"Éï", 3 });
-        m.emplace(L"xke", Entry{ L"Éñ", 3 });
-        m.emplace(L"lka", Entry{ L"Éï", 3 });
-        m.emplace(L"lke", Entry{ L"Éñ", 3 });
-
-        // qa/ku-variants
-        m.emplace(L"qa", Entry{ L"Ç≠Çü", 2 });
-        m.emplace(L"qi", Entry{ L"Ç≠Ç°", 2 });
-        m.emplace(L"qu", Entry{ L"Ç≠",   2 });
-        m.emplace(L"qe", Entry{ L"Ç≠Ç•", 2 });
-        m.emplace(L"qo", Entry{ L"Ç≠Çß", 2 });
-
-        // kw-variants
-        m.emplace(L"kwa", Entry{ L"Ç≠Çü", 3 });
-        m.emplace(L"kwi", Entry{ L"Ç≠Ç°", 3 });
-        m.emplace(L"kwu", Entry{ L"Ç≠Ç£", 3 });
-        m.emplace(L"kwe", Entry{ L"Ç≠Ç•", 3 });
-        m.emplace(L"kwo", Entry{ L"Ç≠Çß", 3 });
-
-        // gw-variants
-        m.emplace(L"gwa", Entry{ L"ÇÆÇü", 3 });
-        m.emplace(L"gwi", Entry{ L"ÇÆÇ°", 3 });
-        m.emplace(L"gwu", Entry{ L"ÇÆÇ£", 3 });
-        m.emplace(L"gwe", Entry{ L"ÇÆÇ•", 3 });
-        m.emplace(L"gwo", Entry{ L"ÇÆÇß", 3 });
-
-        // sw-variants
-        m.emplace(L"swa", Entry{ L"Ç∑Çü", 3 });
-        m.emplace(L"swi", Entry{ L"Ç∑Ç°", 3 });
-        m.emplace(L"swu", Entry{ L"Ç∑Ç£", 3 });
-        m.emplace(L"swe", Entry{ L"Ç∑Ç•", 3 });
-        m.emplace(L"swo", Entry{ L"Ç∑Çß", 3 });
-
-        // zw-variants
-        m.emplace(L"zwa", Entry{ L"Ç∏Çü", 3 });
-        m.emplace(L"zwi", Entry{ L"Ç∏Ç°", 3 });
-        m.emplace(L"zwu", Entry{ L"Ç∏Ç£", 3 });
-        m.emplace(L"zwe", Entry{ L"Ç∏Ç•", 3 });
-        m.emplace(L"zwo", Entry{ L"Ç∏Çß", 3 });
-
-        // xtsu / ltsu variants
-        m.emplace(L"xtu", Entry{ L"Ç¡", 3 });
-        m.emplace(L"xtsu", Entry{ L"Ç¡", 4 });
-        m.emplace(L"ltu", Entry{ L"Ç¡", 3 });
-        m.emplace(L"ltsu", Entry{ L"Ç¡", 4 });
-
-        return m;
+        return L"";
     }
 
-} // anonymous namespace
+    std::wstring value(required, L'\0');
+    _wgetenv_s(&required, &value[0], value.size(), name);
+    if (!value.empty() && value.back() == L'\0')
+    {
+        value.pop_back();
+    }
+
+    return value;
+}
+
+std::filesystem::path GetModuleDirectory()
+{
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&GetModuleDirectory),
+            &module))
+    {
+        return std::filesystem::current_path();
+    }
+
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;)
+    {
+        const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0)
+        {
+            return std::filesystem::current_path();
+        }
+
+        if (length < path.size() - 1)
+        {
+            path.resize(length);
+            return std::filesystem::path(path).parent_path();
+        }
+
+        path.resize(path.size() * 2);
+    }
+}
+
+std::filesystem::path NormalizePath(const std::filesystem::path& path)
+{
+    std::error_code ec;
+    const std::filesystem::path normalized = std::filesystem::weakly_canonical(path, ec);
+    if (ec)
+    {
+        return path.lexically_normal();
+    }
+
+    return normalized;
+}
+
+void AppendMapFileVariants(std::vector<std::filesystem::path>* out, const std::filesystem::path& base)
+{
+    if (base.empty())
+    {
+        return;
+    }
+
+    std::filesystem::path current = base;
+    for (int depth = 0; depth < 5; ++depth)
+    {
+        out->push_back(current / L"romaji-hiragana.tsv");
+        out->push_back(current / L"keymaps" / L"romaji-hiragana.tsv");
+        out->push_back(current / L"dictionaries" / L"romaji-hiragana.tsv");
+
+        if (!current.has_parent_path())
+        {
+            break;
+        }
+
+        const std::filesystem::path parent = current.parent_path();
+        if (parent == current)
+        {
+            break;
+        }
+
+        current = parent;
+    }
+}
+
+std::vector<std::filesystem::path> GetRomajiMapFiles()
+{
+    std::vector<std::filesystem::path> candidates;
+
+    const std::wstring envPath = ReadEnvVar(L"SUMIRE_ROMAJI_MAP_PATH");
+    if (!envPath.empty())
+    {
+        candidates.push_back(std::filesystem::path(envPath));
+    }
+
+    AppendMapFileVariants(&candidates, GetModuleDirectory());
+    AppendMapFileVariants(&candidates, std::filesystem::current_path());
+
+    std::vector<std::filesystem::path> unique;
+    for (const std::filesystem::path& candidate : candidates)
+    {
+        if (candidate.empty())
+        {
+            continue;
+        }
+
+        const std::filesystem::path normalized = NormalizePath(candidate);
+        bool exists = false;
+        for (const std::filesystem::path& current : unique)
+        {
+            if (NormalizePath(current) == normalized)
+            {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists)
+        {
+            unique.push_back(candidate);
+        }
+    }
+
+    return unique;
+}
+
+std::wstring Utf8ToWide(const std::string& utf8)
+{
+    if (utf8.empty())
+    {
+        return L"";
+    }
+
+    size_t offset = 0;
+    if (utf8.size() >= 3 &&
+        static_cast<unsigned char>(utf8[0]) == 0xEF &&
+        static_cast<unsigned char>(utf8[1]) == 0xBB &&
+        static_cast<unsigned char>(utf8[2]) == 0xBF)
+    {
+        offset = 3;
+    }
+
+    const char* data = utf8.data() + offset;
+    const int size = static_cast<int>(utf8.size() - offset);
+    if (size <= 0)
+    {
+        return L"";
+    }
+
+    const int required = MultiByteToWideChar(CP_UTF8, 0, data, size, nullptr, 0);
+    if (required <= 0)
+    {
+        return L"";
+    }
+
+    std::wstring wide(required, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, data, size, &wide[0], required);
+    return wide;
+}
+
+std::wstring Trim(const std::wstring& value)
+{
+    size_t start = 0;
+    while (start < value.size() && iswspace(value[start]))
+    {
+        ++start;
+    }
+
+    size_t end = value.size();
+    while (end > start && iswspace(value[end - 1]))
+    {
+        --end;
+    }
+
+    return value.substr(start, end - start);
+}
+
+std::vector<std::wstring> SplitTsvLine(const std::wstring& line)
+{
+    std::vector<std::wstring> columns;
+    size_t start = 0;
+    for (size_t index = 0; index <= line.size(); ++index)
+    {
+        if (index == line.size() || line[index] == L'\t')
+        {
+            columns.push_back(Trim(line.substr(start, index - start)));
+            start = index + 1;
+        }
+    }
+    return columns;
+}
+
+bool TryParsePositiveInt(const std::wstring& value, int* parsed)
+{
+    if (value.empty())
+    {
+        return false;
+    }
+
+    for (wchar_t ch : value)
+    {
+        if (!iswdigit(ch))
+        {
+            return false;
+        }
+    }
+
+    *parsed = _wtoi(value.c_str());
+    return *parsed > 0;
+}
+
+bool EndsWith(const std::wstring& value, const std::wstring& suffix)
+{
+    if (suffix.size() > value.size())
+    {
+        return false;
+    }
+
+    return std::equal(suffix.rbegin(), suffix.rend(), value.rbegin());
+}
+
+bool ContainsNonAscii(const std::wstring& value)
+{
+    for (wchar_t ch : value)
+    {
+        if (ch > 0x7F)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ParseMapData(const std::wstring& content, Map* out)
+{
+    if (out == nullptr)
+    {
+        return false;
+    }
+
+    out->clear();
+
+    std::wistringstream stream(content);
+    std::wstring line;
+    while (std::getline(stream, line))
+    {
+        if (!line.empty() && line.back() == L'\r')
+        {
+            line.pop_back();
+        }
+
+        const std::wstring trimmed = Trim(line);
+        if (trimmed.empty() || trimmed[0] == L'#')
+        {
+            continue;
+        }
+
+        const std::vector<std::wstring> columns = SplitTsvLine(trimmed);
+        if (columns.size() < 2)
+        {
+            continue;
+        }
+
+        const std::wstring& key = columns[0];
+        const std::wstring& kana = columns[1];
+        if (key.empty() || kana.empty())
+        {
+            continue;
+        }
+
+        RomajiKanaConverter::MapEntry entry;
+        entry.kana = kana;
+        entry.consume = static_cast<int>(key.size());
+
+        for (size_t index = 2; index < columns.size(); ++index)
+        {
+            if (columns[index].empty())
+            {
+                continue;
+            }
+
+            int parsed = 0;
+            if (TryParsePositiveInt(columns[index], &parsed))
+            {
+                entry.consume = parsed;
+                continue;
+            }
+
+            if (entry.pending.empty())
+            {
+                entry.pending = columns[index];
+            }
+        }
+
+        if (entry.consume <= 0)
+        {
+            entry.consume = static_cast<int>(key.size());
+        }
+
+        (*out)[key] = std::move(entry);
+    }
+
+    return !out->empty();
+}
+
+bool LoadMapFile(const std::filesystem::path& path, Map* out)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open())
+    {
+        return false;
+    }
+
+    const std::string bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    if (bytes.empty())
+    {
+        return false;
+    }
+
+    return ParseMapData(Utf8ToWide(bytes), out);
+}
+
+Map CreateDefaultMap()
+{
+    Map map;
+    ParseMapData(Utf8ToWide(kDefaultMapTsv), &map);
+    return map;
+}
+
+int ComputeMaxKeyLength(const Map& map)
+{
+    int maxKeyLength = 1;
+    for (const auto& kv : map)
+    {
+        const int length = static_cast<int>(kv.first.size());
+        if (length > maxKeyLength)
+        {
+            maxKeyLength = length;
+        }
+    }
+
+    return maxKeyLength;
+}
+
+int EffectiveConsumeLength(const std::wstring& key, const RomajiKanaConverter::MapEntry& entry)
+{
+    int consume = entry.consume;
+    if (consume <= 0)
+    {
+        consume = static_cast<int>(key.size());
+    }
+
+    // Optional pending text is reserved for future editable keymap extensions.
+    // For kana outputs like "„Å£", keep the suffix available so subsequent input
+    // can still form a longer syllable such as "tcha" -> "„Å£„Å°„ÇÉ".
+    if (!entry.pending.empty() &&
+        ContainsNonAscii(entry.kana) &&
+        EndsWith(key, entry.pending) &&
+        entry.pending.size() < key.size())
+    {
+        consume = (std::min)(consume, static_cast<int>(key.size() - entry.pending.size()));
+    }
+
+    if (consume < 1)
+    {
+        consume = 1;
+    }
+    if (consume > static_cast<int>(key.size()))
+    {
+        consume = static_cast<int>(key.size());
+    }
+
+    return consume;
+}
+} // namespace
 
 RomajiKanaConverter::RomajiKanaConverter()
 {
-    m_romajiToKana = CreateDefaultMap();
-
-    m_maxKeyLength = 1;
-    for (const auto& kv : m_romajiToKana)
+    for (const std::filesystem::path& candidate : GetRomajiMapFiles())
     {
-        int len = static_cast<int>(kv.first.size());
-        if (len > m_maxKeyLength)
-            m_maxKeyLength = len;
+        Map loadedMap;
+        if (LoadMapFile(candidate, &loadedMap))
+        {
+            m_romajiToKana = std::move(loadedMap);
+            m_loadedMapPath = candidate;
+            break;
+        }
+    }
+
+    if (m_romajiToKana.empty())
+    {
+        m_romajiToKana = CreateDefaultMap();
+    }
+
+    m_maxKeyLength = ComputeMaxKeyLength(m_romajiToKana);
+
+    if (!m_loadedMapPath.empty())
+    {
+        DebugLog(L"RomajiKanaConverter: loaded map from %s\r\n", m_loadedMapPath.c_str());
+    }
+    else
+    {
+        DebugLog(L"RomajiKanaConverter: using embedded fallback map\r\n");
     }
 }
 
 wchar_t RomajiKanaConverter::ToHalfWidth(wchar_t ch)
 {
-    // ëSäpâpéö Å® îºäpâpéöÅiè¨ï∂éöÇ…ëµÇ¶ÇÈÅj
-    if (ch >= L'ÇÅ' && ch <= L'Çö')
+    if (ch >= L'A' && ch <= L'Z')
     {
-        return L'a' + (ch - L'ÇÅ');
+        return L'a' + (ch - L'A');
     }
-    if (ch >= L'Ç`' && ch <= L'Çy')
+    if (ch >= L'a' && ch <= L'z')
     {
-        return L'a' + (ch - L'Ç`');
-    }
-
-    // ëSäpêîéö Å® îºäpêîéö
-    if (ch >= L'ÇO' && ch <= L'ÇX')
-    {
-        return L'0' + (ch - L'ÇO');
+        return ch;
     }
 
-    // ëSäp [ ] Å® îºäp
-    if (ch == L'Åm') return L'[';
-    if (ch == L'Ån') return L']';
+    if (ch >= L'ÔΩÅ' && ch <= L'ÔΩö')
+    {
+        return L'a' + (ch - L'ÔΩÅ');
+    }
+    if (ch >= L'Ôº°' && ch <= L'Ôº∫')
+    {
+        return L'a' + (ch - L'Ôº°');
+    }
 
-    // ÇªÇÃëºÇÕÇªÇÃÇ‹Ç‹
+    if (ch >= L'Ôºê' && ch <= L'Ôºô')
+    {
+        return L'0' + (ch - L'Ôºê');
+    }
+
+    if (ch == L'Ôºª') return L'[';
+    if (ch == L'ÔºΩ') return L']';
+
     return ch;
 }
 
@@ -448,73 +798,49 @@ std::wstring RomajiKanaConverter::FullWidthToHalfWidth(const std::wstring& src)
     return dst;
 }
 
-// RawText(ëSäp) -> SurfaceText(Ç©Ç») Ç…ïœä∑
 std::wstring RomajiKanaConverter::ConvertFromRaw(const std::wstring& raw) const
 {
-    // Ç‹Ç∏ëSäpâpêîÇîºäpÇ…ê≥ãKâª
-    std::wstring text = FullWidthToHalfWidth(raw);
+    const std::wstring text = FullWidthToHalfWidth(raw);
 
     std::wstring result;
     size_t i = 0;
 
     while (i < text.size())
     {
-        wchar_t current = text[i];
+        const wchar_t current = text[i];
 
-        // 1. '[' / ']' ÇÕïœä∑ÇπÇ∏ÇªÇÃÇ‹Ç‹
-        if (current == L'[' || current == L']')
+        bool matched = false;
+        for (int len = m_maxKeyLength; len >= 1; --len)
         {
-            result.push_back(current);
-            ++i;
-            continue;
+            if (i + len > text.size())
+            {
+                continue;
+            }
+
+            const std::wstring segment = text.substr(i, len);
+            const auto it = m_romajiToKana.find(segment);
+            if (it == m_romajiToKana.end())
+            {
+                continue;
+            }
+
+            result.append(it->second.kana);
+            i += EffectiveConsumeLength(segment, it->second);
+            matched = true;
+            break;
         }
 
-        // 2. ë£âπÅiÇ¡ÅjÇÃîªíË: éqâπÇÃèdÇÀÅinn ÇèúÇ≠Åj
-        if (i + 1 < text.size() &&
-            current == text[i + 1])
+        if (!matched && i + 1 < text.size() && current == text[i + 1])
         {
             const std::wstring sokuonConsonants = L"kstcpbdfghljmqrvwxyz";
             if (sokuonConsonants.find(current) != std::wstring::npos)
             {
-                result.push_back(L'Ç¡');
-                ++i; // 1ï∂éöÇæÇØè¡îÔ
-                continue;
-            }
-        }
-
-        // 3. ÅunÅvÇÃì¡ï ÉãÅ[Éã
-        if (current == L'n' && i + 1 < text.size())
-        {
-            wchar_t next = text[i + 1];
-            const std::wstring vowels = L"aiueoyn";
-            if (vowels.find(next) == std::wstring::npos)
-            {
-                result.push_back(L'ÇÒ');
+                result.push_back(L'„Å£');
                 ++i;
                 continue;
             }
         }
 
-        // 4. ç≈í∑àÍívÇ≈ romajiToKana Çà¯Ç≠
-        bool matched = false;
-        for (int len = m_maxKeyLength; len >= 1; --len)
-        {
-            if (i + len > text.size())
-                continue;
-
-            std::wstring segment = text.substr(i, len);
-            auto it = m_romajiToKana.find(segment);
-            if (it != m_romajiToKana.end())
-            {
-                const MapEntry& entry = it->second;
-                result.append(entry.kana);
-                i += entry.consume;
-                matched = true;
-                break;
-            }
-        }
-
-        // 5. É}ÉbÉ`ÇµÇ»Ç©Ç¡ÇΩï∂éöÇÕÇªÇÃÇ‹Ç‹
         if (!matched)
         {
             result.push_back(text[i]);

@@ -5,6 +5,7 @@
 #endif
 #include <Windows.h>
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <filesystem>
@@ -43,11 +44,25 @@ void AppendUnique(std::vector<std::wstring>* candidates, const std::wstring& can
 struct PathStep
 {
     size_t start = 0;
-    int bestCost = 0;
-    int prevEnd = -1;
-    int prevIndex = -1;
     LexiconEntry entry;
+    struct Hypothesis
+    {
+        int totalCost = 0;
+        int prevEnd = -1;
+        int prevIndex = -1;
+        int prevRank = -1;
+    };
+    std::vector<Hypothesis> hypotheses;
 };
+
+struct TerminalHypothesis
+{
+    int totalCost = 0;
+    int nodeIndex = -1;
+    int rank = -1;
+};
+
+constexpr size_t kMaxConversionCandidates = 4;
 
 LexiconEntry MakeUnknownEntry(const std::wstring& reading, size_t start)
 {
@@ -445,6 +460,64 @@ std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
 
     return unique;
 }
+
+ConversionCandidate BuildConversionCandidateFromTerminal(
+    const LexiconRegistry& lexicons,
+    const std::wstring& reading,
+    const std::vector<std::vector<PathStep>>& lattice,
+    size_t end,
+    int nodeIndex,
+    int rank,
+    int totalCost)
+{
+    ConversionCandidate candidate;
+    candidate.reading = reading;
+    candidate.totalCost = totalCost;
+
+    std::vector<BunsetsuConversion> bunsetsuReversed;
+    while (end > 0 && nodeIndex >= 0 && rank >= 0)
+    {
+        const PathStep& step = lattice[end][static_cast<size_t>(nodeIndex)];
+        const PathStep::Hypothesis& hypothesis = step.hypotheses[static_cast<size_t>(rank)];
+
+        BunsetsuConversion bunsetsu;
+        bunsetsu.start = static_cast<int>(step.start);
+        bunsetsu.length = static_cast<int>(end - step.start);
+        bunsetsu.reading = step.entry.reading;
+        bunsetsu.surface = step.entry.surface;
+        bunsetsu.alternatives = BuildAlternatives(lexicons, bunsetsu.reading, bunsetsu.surface);
+        bunsetsuReversed.push_back(std::move(bunsetsu));
+
+        end = static_cast<size_t>(hypothesis.prevEnd >= 0 ? hypothesis.prevEnd : 0);
+        nodeIndex = hypothesis.prevIndex;
+        rank = hypothesis.prevRank;
+    }
+
+    for (std::vector<BunsetsuConversion>::reverse_iterator it = bunsetsuReversed.rbegin();
+        it != bunsetsuReversed.rend();
+        ++it)
+    {
+        candidate.surface += it->surface;
+        candidate.bunsetsu.push_back(*it);
+    }
+
+    return candidate;
+}
+
+std::wstring BuildCandidateSignature(const ConversionCandidate& candidate)
+{
+    std::wstring signature;
+    for (const BunsetsuConversion& bunsetsu : candidate.bunsetsu)
+    {
+        signature += std::to_wstring(bunsetsu.start);
+        signature += L":";
+        signature += std::to_wstring(bunsetsu.length);
+        signature += L":";
+        signature += bunsetsu.surface;
+        signature += L"\x1F";
+    }
+    return signature;
+}
 }
 
 KanaKanjiConverter::KanaKanjiConverter()
@@ -513,9 +586,6 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
             const size_t end = start + entryLength;
             PathStep node;
             node.start = start;
-            node.bestCost = kInf;
-            node.prevEnd = -1;
-            node.prevIndex = -1;
             node.entry = entry;
             lattice[end].push_back(std::move(node));
         }
@@ -528,10 +598,14 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
         {
             PathStep& node = nodes[nodeIndex];
             const int wordCost = GetAdjustedWordCost(node.entry);
+            std::vector<PathStep::Hypothesis> hypotheses;
 
             if (node.start == 0)
             {
-                node.bestCost = wordCost + GetConnectionCost(_connectionMatrix, _connectionDimension, 0, node.entry.rightId);
+                PathStep::Hypothesis hypothesis;
+                hypothesis.totalCost = wordCost + GetConnectionCost(_connectionMatrix, _connectionDimension, 0, node.entry.rightId);
+                hypotheses.push_back(hypothesis);
+                node.hypotheses = std::move(hypotheses);
                 continue;
             }
 
@@ -539,75 +613,116 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
             for (size_t prevIndex = 0; prevIndex < previousNodes.size(); ++prevIndex)
             {
                 const PathStep& previous = previousNodes[prevIndex];
-                if (previous.bestCost >= kInf)
+                for (size_t prevRank = 0; prevRank < previous.hypotheses.size(); ++prevRank)
                 {
-                    continue;
-                }
+                    const PathStep::Hypothesis& previousHypothesis = previous.hypotheses[prevRank];
+                    if (previousHypothesis.totalCost >= kInf)
+                    {
+                        continue;
+                    }
 
-                const int edgeCost = GetConnectionCost(_connectionMatrix, _connectionDimension, previous.entry.leftId, node.entry.rightId);
-                const int candidateCost = previous.bestCost + edgeCost + wordCost;
-                if (candidateCost < node.bestCost)
-                {
-                    node.bestCost = candidateCost;
-                    node.prevEnd = static_cast<int>(node.start);
-                    node.prevIndex = static_cast<int>(prevIndex);
+                    PathStep::Hypothesis hypothesis;
+                    hypothesis.totalCost =
+                        previousHypothesis.totalCost +
+                        GetConnectionCost(_connectionMatrix, _connectionDimension, previous.entry.leftId, node.entry.rightId) +
+                        wordCost;
+                    hypothesis.prevEnd = static_cast<int>(node.start);
+                    hypothesis.prevIndex = static_cast<int>(prevIndex);
+                    hypothesis.prevRank = static_cast<int>(prevRank);
+                    hypotheses.push_back(hypothesis);
                 }
             }
+
+            std::sort(
+                hypotheses.begin(),
+                hypotheses.end(),
+                [](const PathStep::Hypothesis& lhs, const PathStep::Hypothesis& rhs)
+                {
+                    return lhs.totalCost < rhs.totalCost;
+                });
+            if (hypotheses.size() > kMaxConversionCandidates)
+            {
+                hypotheses.resize(kMaxConversionCandidates);
+            }
+            node.hypotheses = std::move(hypotheses);
         }
     }
 
-    int bestTerminalIndex = -1;
-    int bestTerminalCost = kInf;
+    std::vector<TerminalHypothesis> terminals;
     for (size_t nodeIndex = 0; nodeIndex < lattice[length].size(); ++nodeIndex)
     {
         const PathStep& node = lattice[length][nodeIndex];
-        if (node.bestCost >= kInf)
+        for (size_t rank = 0; rank < node.hypotheses.size(); ++rank)
         {
-            continue;
-        }
+            const PathStep::Hypothesis& hypothesis = node.hypotheses[rank];
+            if (hypothesis.totalCost >= kInf)
+            {
+                continue;
+            }
 
-        const int totalCost = node.bestCost + GetConnectionCost(_connectionMatrix, _connectionDimension, node.entry.leftId, 0);
-        if (totalCost < bestTerminalCost)
-        {
-            bestTerminalCost = totalCost;
-            bestTerminalIndex = static_cast<int>(nodeIndex);
+            TerminalHypothesis terminal;
+            terminal.totalCost =
+                hypothesis.totalCost +
+                GetConnectionCost(_connectionMatrix, _connectionDimension, node.entry.leftId, 0);
+            terminal.nodeIndex = static_cast<int>(nodeIndex);
+            terminal.rank = static_cast<int>(rank);
+            terminals.push_back(terminal);
         }
     }
 
-    if (bestTerminalIndex < 0)
+    if (terminals.empty())
     {
         return result;
     }
 
-    ConversionCandidate bestCandidate;
-    bestCandidate.reading = reading;
-    bestCandidate.totalCost = bestTerminalCost;
+    std::sort(
+        terminals.begin(),
+        terminals.end(),
+        [](const TerminalHypothesis& lhs, const TerminalHypothesis& rhs)
+        {
+            return lhs.totalCost < rhs.totalCost;
+        });
 
-    std::vector<BunsetsuConversion> bunsetsuReversed;
-    for (int end = static_cast<int>(length), nodeIndex = bestTerminalIndex; end > 0 && nodeIndex >= 0;)
+    std::vector<std::wstring> signatures;
+    for (const TerminalHypothesis& terminal : terminals)
     {
-        const PathStep& step = lattice[static_cast<size_t>(end)][static_cast<size_t>(nodeIndex)];
+        ConversionCandidate candidate = BuildConversionCandidateFromTerminal(
+            *_lexicons,
+            reading,
+            lattice,
+            length,
+            terminal.nodeIndex,
+            terminal.rank,
+            terminal.totalCost);
+        const std::wstring signature = BuildCandidateSignature(candidate);
+        bool duplicate = false;
+        for (const std::wstring& existing : signatures)
+        {
+            if (existing == signature)
+            {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate)
+        {
+            continue;
+        }
 
-        BunsetsuConversion bunsetsu;
-        bunsetsu.start = static_cast<int>(step.start);
-        bunsetsu.length = end - static_cast<int>(step.start);
-        bunsetsu.reading = step.entry.reading;
-        bunsetsu.surface = step.entry.surface;
-        bunsetsu.alternatives = BuildAlternatives(*_lexicons, bunsetsu.reading, bunsetsu.surface);
-        bunsetsuReversed.push_back(bunsetsu);
-
-        end = step.prevEnd;
-        nodeIndex = step.prevIndex;
+        signatures.push_back(signature);
+        result.candidates.push_back(std::move(candidate));
+        if (result.candidates.size() >= kMaxConversionCandidates)
+        {
+            break;
+        }
     }
 
-    for (std::vector<BunsetsuConversion>::reverse_iterator it = bunsetsuReversed.rbegin();
-        it != bunsetsuReversed.rend();
-        ++it)
+    if (result.candidates.empty())
     {
-        bestCandidate.surface += it->surface;
-        bestCandidate.bunsetsu.push_back(*it);
+        return result;
     }
 
+    const ConversionCandidate& bestCandidate = result.candidates[0];
     for (size_t index = 0; index < bestCandidate.bunsetsu.size(); ++index)
     {
         const BunsetsuConversion& bunsetsu = bestCandidate.bunsetsu[index];
@@ -618,6 +733,5 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
         }
     }
 
-    result.candidates.push_back(bestCandidate);
     return result;
 }

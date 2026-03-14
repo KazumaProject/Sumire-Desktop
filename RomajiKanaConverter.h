@@ -1,5 +1,6 @@
 // RomajiKanaConverter.h
 #pragma once
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 
@@ -10,16 +11,18 @@ public:
     {
         std::wstring kana;
         int consume;
+        std::wstring pending;
     };
 
     RomajiKanaConverter();
 
-    // RawText（全角アルファベットを含む）から SurfaceText（かな）を生成
+    // Converts raw romaji text into the hiragana surface text.
     std::wstring ConvertFromRaw(const std::wstring& raw) const;
 
 private:
     std::unordered_map<std::wstring, MapEntry> m_romajiToKana;
     int m_maxKeyLength;
+    std::filesystem::path m_loadedMapPath;
 
     static wchar_t ToHalfWidth(wchar_t ch);
     static std::wstring FullWidthToHalfWidth(const std::wstring& src);
