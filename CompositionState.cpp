@@ -696,6 +696,48 @@ bool CompositionState::SelectLastCandidate()
     return true;
 }
 
+bool CompositionState::SelectCandidatePage(int delta, int pageSize)
+{
+    if (pageSize <= 0 || !HasCandidates())
+    {
+        return false;
+    }
+
+    const int candidateCount = static_cast<int>(GetCandidates().size());
+    if (candidateCount <= 0)
+    {
+        return false;
+    }
+
+    int selectedIndex = GetSelectedCandidateIndex();
+    if (selectedIndex < 0 || selectedIndex >= candidateCount)
+    {
+        selectedIndex = 0;
+    }
+
+    const int pageCount = (candidateCount + pageSize - 1) / pageSize;
+    const int rowIndex = selectedIndex % pageSize;
+    int pageIndex = selectedIndex / pageSize;
+    pageIndex += delta;
+    while (pageIndex < 0)
+    {
+        pageIndex += pageCount;
+    }
+    while (pageIndex >= pageCount)
+    {
+        pageIndex -= pageCount;
+    }
+
+    int targetIndex = pageIndex * pageSize + rowIndex;
+    if (targetIndex >= candidateCount)
+    {
+        targetIndex = candidateCount - 1;
+    }
+
+    SetSelectedCandidateIndex(targetIndex);
+    return true;
+}
+
 bool CompositionState::MoveFocusLeft()
 {
     if (_phase == CompositionPhase::RechunkSelecting)

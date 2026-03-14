@@ -939,6 +939,28 @@ HRESULT CTextService::_SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext
     return _UpdateCompositionText(ec, pContext);
 }
 
+HRESULT CTextService::_SelectNextCandidatePage(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectCandidatePage(1, 9))
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
+HRESULT CTextService::_SelectPrevCandidatePage(TfEditCookie ec, ITfContext* pContext)
+{
+    if (!_compositionState.SelectCandidatePage(-1, 9))
+    {
+        return S_FALSE;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    return _UpdateCompositionText(ec, pContext);
+}
+
 HRESULT CTextService::_SelectFirstCandidate(TfEditCookie ec, ITfContext* pContext)
 {
     if (!_compositionState.SelectFirstCandidate())

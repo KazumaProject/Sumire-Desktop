@@ -117,6 +117,7 @@ public:
     bool SelectPrevCandidate();
     bool SelectFirstCandidate();
     bool SelectLastCandidate();
+    bool SelectCandidatePage(int delta, int pageSize);
     bool ApplySelectedRechunkOption();
     bool CancelRechunkSelection();
     bool MoveFocusLeft();

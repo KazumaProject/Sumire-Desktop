@@ -717,10 +717,10 @@ void CCandidateWindow::_InitList()
         _arCandStr[i] = NULL;
     }
 
-    _uPageCnt = (_uCandList == 0) ? 0 : ((_uCandList - 1) / 10) + 1;
+    _uPageCnt = (_uCandList == 0) ? 0 : ((_uCandList - 1) / kCandidatePageSize) + 1;
     for (i = 0; i < _uPageCnt; i++)
     {
-        _arPageIndex[i] = i * 10;
+        _arPageIndex[i] = i * kCandidatePageSize;
     }
     for (; i < MAX_CAND_STR; i++)
     {
@@ -982,9 +982,19 @@ LRESULT CALLBACK CCandidateWindow::_WindowProc(HWND hwnd, UINT uMsg, WPARAM wPar
                     FillRect(hdc, &rcClient, (HBRUSH)GetStockObject(WHITE_BRUSH));
 
                     const int itemHeight = 20;
-                    for (UINT i = 0; i < pThis->_uCandList; i++)
+                    UINT currentPage = 0;
+                    pThis->GetCurrentPage(&currentPage);
+                    const UINT pageStart = pThis->_arPageIndex[currentPage];
+                    const UINT pageEnd = min(pageStart + CCandidateWindow::kCandidatePageSize, pThis->_uCandList);
+
+                    for (UINT i = pageStart; i < pageEnd; i++)
                     {
-                        RECT rcItem = { 4, 4 + static_cast<int>(i) * itemHeight, rcClient.right - 4, 4 + static_cast<int>(i + 1) * itemHeight };
+                        const UINT row = i - pageStart;
+                        RECT rcItem = {
+                            4,
+                            4 + static_cast<int>(row) * itemHeight,
+                            rcClient.right - 4,
+                            4 + static_cast<int>(row + 1) * itemHeight };
                         if (i == pThis->_uSelection)
                         {
                             HBRUSH hBrush = CreateSolidBrush(RGB(220, 235, 255));
@@ -996,6 +1006,15 @@ LRESULT CALLBACK CCandidateWindow::_WindowProc(HWND hwnd, UINT uMsg, WPARAM wPar
                         StringCchPrintf(szLine, ARRAYSIZE(szLine), L"%d. %s", i + 1, pThis->_arCandStr[i] ? pThis->_arCandStr[i] : L"");
                         TextOut(hdc, rcItem.left + 4, rcItem.top + 2, szLine, lstrlen(szLine));
                     }
+
+                    WCHAR szPage[64];
+                    StringCchPrintf(
+                        szPage,
+                        ARRAYSIZE(szPage),
+                        L"Page %u/%u",
+                        currentPage + 1,
+                        max(1u, pThis->_uPageCnt));
+                    TextOut(hdc, 8, rcClient.bottom - itemHeight, szPage, lstrlen(szPage));
                 }
             }
             EndPaint(hwnd, &ps);

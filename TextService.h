@@ -117,6 +117,8 @@ public:
     HRESULT _HandleModeToggleKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectNextCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _SelectNextCandidatePage(TfEditCookie ec, ITfContext* pContext);
+    HRESULT _SelectPrevCandidatePage(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectFirstCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _SelectLastCandidate(TfEditCookie ec, ITfContext* pContext);
     HRESULT _CommitCurrentCandidate(TfEditCookie ec, ITfContext* pContext);
