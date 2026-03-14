@@ -91,8 +91,11 @@ STDAPI CCandidateKeyEditSession::DoEditSession(TfEditCookie ec)
         break;
 
     case VK_DOWN:
-    case VK_SPACE:
         hr = _pTextService->_SelectNextCandidate(ec, _pContext);
+        break;
+
+    case VK_SPACE:
+        hr = _pTextService->_HandleSpaceKey(ec, _pContext);
         break;
 
     case VK_RETURN:
@@ -252,13 +255,28 @@ STDAPI CCandidateList::OnKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
         pEditSession->Release();
     }
 
-    if (wParam == VK_ESCAPE || wParam == VK_BACK || wParam == VK_DELETE)
+    const CompositionPhase phase = _pTextService->_GetCompositionState().GetPhase();
+    const bool keepCandidateList =
+        phase == CompositionPhase::CandidateSelecting ||
+        phase == CompositionPhase::RechunkSelecting;
+
+    if (wParam == VK_RETURN)
     {
-        _EndCandidateList();
+        if (keepCandidateList)
+        {
+            if (_pCandidateWindow != NULL)
+            {
+                _pCandidateWindow->_RefreshFromState();
+            }
+        }
+        else
+        {
+            _EndCandidateList();
+        }
     }
-    else if (wParam == VK_RETURN)
+    else if (wParam == VK_ESCAPE || wParam == VK_BACK || wParam == VK_DELETE)
     {
-        if (_pTextService->_GetCompositionState().GetPhase() == CompositionPhase::CandidateSelecting)
+        if (keepCandidateList)
         {
             if (_pCandidateWindow != NULL)
             {

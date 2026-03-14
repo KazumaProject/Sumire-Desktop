@@ -969,6 +969,17 @@ HRESULT CTextService::_CommitCurrentCandidate(TfEditCookie ec, ITfContext* pCont
         return S_OK;
     }
 
+    if (_compositionState.GetPhase() == CompositionPhase::RechunkSelecting)
+    {
+        if (!_compositionState.ApplySelectedRechunkOption())
+        {
+            return S_FALSE;
+        }
+
+        _compositionPhase = _compositionState.GetPhase();
+        return _UpdateCompositionText(ec, pContext);
+    }
+
     if (_compositionState.GetPhase() == CompositionPhase::CandidateSelecting)
     {
         if (!_compositionState.CommitFocusedSegment())
@@ -1006,6 +1017,17 @@ HRESULT CTextService::_CommitCurrentCandidate(TfEditCookie ec, ITfContext* pCont
 
 HRESULT CTextService::_CancelConversion(TfEditCookie ec, ITfContext* pContext)
 {
+    if (_compositionState.GetPhase() == CompositionPhase::RechunkSelecting)
+    {
+        if (!_compositionState.CancelRechunkSelection())
+        {
+            return S_FALSE;
+        }
+
+        _compositionPhase = _compositionState.GetPhase();
+        return _UpdateCompositionText(ec, pContext);
+    }
+
     _compositionState.CancelConversion(GetEffectiveInputMode(), _romajiConverter);
     _compositionPhase = _compositionState.GetPhase();
 

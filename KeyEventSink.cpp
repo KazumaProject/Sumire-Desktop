@@ -17,6 +17,8 @@
 #include "TextService.h"
 #include "CandidateList.h"
 
+#include <cwctype>
+
 //
 // GUID for the preserved keys.
 //
@@ -52,13 +54,62 @@ static const TF_PRESERVEDKEY c_pkeyF6 = { VK_F6, TF_MOD_ON_KEYUP };
 static const WCHAR c_szPKeyOnOff[] = L"OnOff";
 static const WCHAR c_szPKeyF6[] = L"Function 6";
 
+namespace
+{
+bool CanTranslateToPrintableChar(WPARAM wParam, LPARAM lParam)
+{
+    if ((wParam >= 'A' && wParam <= 'Z') || (wParam >= '0' && wParam <= '9'))
+    {
+        return true;
+    }
+
+    BYTE keyboardState[256] = {};
+    if (!GetKeyboardState(keyboardState))
+    {
+        return false;
+    }
+
+    WCHAR translated[4] = {};
+    const UINT scanCode = (static_cast<UINT>(lParam) >> 16) & 0xFF;
+    const HKL keyboardLayout = GetKeyboardLayout(0);
+    const int translatedCount = ToUnicodeEx(
+        static_cast<UINT>(wParam),
+        scanCode,
+        keyboardState,
+        translated,
+        ARRAYSIZE(translated),
+        0,
+        keyboardLayout);
+
+    if (translatedCount > 0 && iswprint(translated[0]))
+    {
+        return true;
+    }
+
+    if (translatedCount < 0)
+    {
+        BYTE emptyState[256] = {};
+        ToUnicodeEx(
+            static_cast<UINT>(wParam),
+            scanCode,
+            emptyState,
+            translated,
+            ARRAYSIZE(translated),
+            0,
+            keyboardLayout);
+    }
+
+    return false;
+}
+}
+
 //+---------------------------------------------------------------------------
 //
 // _IsKeyEaten
 //
 //----------------------------------------------------------------------------
 
-BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
+BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lParam)
 {
     // 1. キーボードが無効なら何も食べない
     if (_IsKeyboardDisabled())
@@ -133,11 +184,7 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam)
     }
 
     // A〜Z はローマ字かな入力として IME が食う
-    if (wParam >= 'A' && wParam <= 'Z')
-        return TRUE;
-
-    // 0〜9 もローマ字テーブル側で使うので IME が食う
-    if (wParam >= '0' && wParam <= '9')
+    if (CanTranslateToPrintableChar(wParam, lParam))
         return TRUE;
 
     return FALSE;
@@ -170,7 +217,7 @@ STDAPI CTextService::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM l
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = _IsKeyEaten(pContext, wParam);
+    *pfEaten = _IsKeyEaten(pContext, wParam, lParam);
     if (wParam == VK_F12)
     {
         DebugLog(L"[OnTestKeyDown] wParam=VK_F12 pfEaten=%s\r\n", *pfEaten ? L"TRUE" : L"FALSE");
@@ -193,7 +240,7 @@ STDAPI CTextService::OnKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lPara
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
-    *pfEaten = _IsKeyEaten(pContext, wParam);
+    *pfEaten = _IsKeyEaten(pContext, wParam, lParam);
     if (wParam == VK_F12)
     {
         DebugLog(L"[OnKeyDown] wParam=VK_F12 pfEaten=%s\r\n", *pfEaten ? L"TRUE" : L"FALSE");

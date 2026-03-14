@@ -107,7 +107,7 @@ public:
     void _ResetCompositionState();
 
     // key event handlers.
-    HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
+    HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam, LPARAM lParam);
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
@@ -189,7 +189,7 @@ private:
     void _UninitPreservedKey();
 
     // utility function for KeyEventSink
-    BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam);
+    BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
     void _UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr);
     void _KeyboardOpenCloseChanged();
     void _KeyboardInputConversionChanged();
