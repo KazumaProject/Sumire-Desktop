@@ -28,6 +28,7 @@ const TCHAR c_szAttributeInfoKey[] = TEXT("Software\\Sample Text Service");
 // the registry values of the custmized display attributes
 const TCHAR CDisplayAttributeInfoInput::_s_szValueName[] = TEXT("DisplayAttributeInput");
 const TCHAR CDisplayAttributeInfoConverted::_s_szValueName[] = TEXT("DisplayAttributeConverted");
+const TCHAR CDisplayAttributeInfoFocusedConverted::_s_szValueName[] = TEXT("DisplayAttributeFocusedConverted");
 
 //+---------------------------------------------------------------------------
 //
@@ -37,6 +38,7 @@ const TCHAR CDisplayAttributeInfoConverted::_s_szValueName[] = TEXT("DisplayAttr
 
 const WCHAR CDisplayAttributeInfoInput::_s_szDescription[] = L"TextService Display Attribute Input";
 const WCHAR CDisplayAttributeInfoConverted::_s_szDescription[] = L"TextService Display Attribute Converted";
+const WCHAR CDisplayAttributeInfoFocusedConverted::_s_szDescription[] = L"TextService Display Attribute Focused Converted";
 
 
 //+---------------------------------------------------------------------------
@@ -57,8 +59,18 @@ const TF_DISPLAYATTRIBUTE CDisplayAttributeInfoInput::_s_DisplayAttribute =
 
 const TF_DISPLAYATTRIBUTE CDisplayAttributeInfoConverted::_s_DisplayAttribute =
 {
+    { TF_CT_COLORREF, RGB(  0,   0,   0) }, // text color
+    { TF_CT_NONE, 0 },                      // background color
+    TF_LS_SOLID,                            // underline style
+    FALSE,                                  // underline boldness
+    { TF_CT_COLORREF, RGB(  0, 120, 215) }, // underline color
+    TF_ATTR_CONVERTED                       // attribute info
+};
+
+const TF_DISPLAYATTRIBUTE CDisplayAttributeInfoFocusedConverted::_s_DisplayAttribute =
+{
     { TF_CT_COLORREF, RGB(255, 255, 255) }, // text color
-    { TF_CT_COLORREF, RGB(  0, 255, 255) }, // background color (TF_CT_NONE => app default)
+    { TF_CT_COLORREF, RGB(  0, 120, 215) }, // background color
     TF_LS_NONE,                             // underline style
     FALSE,                                  // underline boldness
     { TF_CT_NONE, 0 },                      // underline color

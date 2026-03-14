@@ -57,6 +57,7 @@ extern const GUID c_guidLangBarItemButtonMode;
 // Display Attribute GUID
 extern const GUID c_guidDisplayAttributeInput;
 extern const GUID c_guidDisplayAttributeConverted;
+extern const GUID c_guidDisplayAttributeFocusedConverted;
 
 #endif // GLOBALS_H
 

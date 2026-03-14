@@ -107,6 +107,9 @@ BOOL CTextService::_InitDisplayAttributeGuidAtom()
     // register the display attribute for the converted text.
     hr = pCategoryMgr->RegisterGUID(c_guidDisplayAttributeConverted, &_gaDisplayAttributeConverted);
 
+    // register the display attribute for the focused converted text.
+    hr = pCategoryMgr->RegisterGUID(c_guidDisplayAttributeFocusedConverted, &_gaDisplayAttributeFocusedConverted);
+
     pCategoryMgr->Release();
         
     return (hr == S_OK);

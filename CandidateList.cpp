@@ -86,11 +86,8 @@ STDAPI CCandidateKeyEditSession::DoEditSession(TfEditCookie ec)
         break;
 
     case VK_LEFT:
-        hr = _pTextService->_SelectFirstCandidate(ec, _pContext);
-        break;
-
     case VK_RIGHT:
-        hr = _pTextService->_SelectLastCandidate(ec, _pContext);
+        hr = _pTextService->_HandleArrowKey(ec, _pContext, _wParam);
         break;
 
     case VK_DOWN:
@@ -255,9 +252,23 @@ STDAPI CCandidateList::OnKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
         pEditSession->Release();
     }
 
-    if (wParam == VK_RETURN || wParam == VK_ESCAPE || wParam == VK_BACK || wParam == VK_DELETE)
+    if (wParam == VK_ESCAPE || wParam == VK_BACK || wParam == VK_DELETE)
     {
         _EndCandidateList();
+    }
+    else if (wParam == VK_RETURN)
+    {
+        if (_pTextService->_GetCompositionState().GetPhase() == CompositionPhase::CandidateSelecting)
+        {
+            if (_pCandidateWindow != NULL)
+            {
+                _pCandidateWindow->_RefreshFromState();
+            }
+        }
+        else
+        {
+            _EndCandidateList();
+        }
     }
     else if (_pCandidateWindow != NULL)
     {

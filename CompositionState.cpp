@@ -1,7 +1,18 @@
 #include "CompositionState.h"
 
+#include <algorithm>
+
+#include "KanaKanjiConverter.h"
 #include "RomajiKanaConverter.h"
-#include "TextService.h"
+
+namespace
+{
+const std::vector<std::wstring>& EmptyCandidates()
+{
+    static const std::vector<std::wstring> kEmptyCandidates;
+    return kEmptyCandidates;
+}
+}
 
 CompositionState::CompositionState()
 {
@@ -14,9 +25,10 @@ void CompositionState::Reset()
     _reading.clear();
     _preedit.clear();
     _rawCursor = 0;
+    _caretPosition = 0;
     _preeditCursor = 0;
-    _candidates.clear();
-    _selectedCandidateIndex = -1;
+    _boundaries.clear();
+    ResetConversionSession();
     _phase = CompositionPhase::Idle;
     _legacyBuffer.Reset();
 }
@@ -31,6 +43,8 @@ void CompositionState::Begin()
 
 void CompositionState::InsertRawChar(WCHAR ch, InputMode mode, const RomajiKanaConverter& converter)
 {
+    SyncRawCursorFromCaret(mode, converter);
+
     if (_rawCursor < 0)
     {
         _rawCursor = 0;
@@ -42,14 +56,15 @@ void CompositionState::InsertRawChar(WCHAR ch, InputMode mode, const RomajiKanaC
 
     _rawInput.insert(_rawInput.begin() + _rawCursor, ch);
     ++_rawCursor;
-    _candidates.clear();
-    _selectedCandidateIndex = -1;
+    ResetConversionSession();
     _phase = CompositionPhase::Composing;
     RebuildTexts(mode, converter);
 }
 
 bool CompositionState::Backspace(InputMode mode, const RomajiKanaConverter& converter)
 {
+    SyncRawCursorFromCaret(mode, converter);
+
     if (_rawInput.empty() || _rawCursor <= 0)
     {
         return false;
@@ -60,11 +75,8 @@ bool CompositionState::Backspace(InputMode mode, const RomajiKanaConverter& conv
         mode == InputMode::HalfwidthKatakana ||
         mode == InputMode::FullwidthKatakana)
     {
-        const std::wstring rawPrefix = _rawInput.substr(0, _rawCursor);
-        const std::wstring visiblePrefix = BuildPreeditText(rawPrefix, mode, converter);
-        LONG visibleCursor = static_cast<LONG>(visiblePrefix.size());
-        LONG targetVisibleCursor = (visibleCursor > 0) ? (visibleCursor - 1) : 0;
-        eraseStart = RawCursorFromVisibleCursor(_rawInput, targetVisibleCursor, mode, converter);
+        const LONG targetCaret = (_caretPosition > 0) ? (_caretPosition - 1) : 0;
+        eraseStart = RawCursorFromVisibleCursor(_rawInput, targetCaret, mode, converter);
     }
 
     if (eraseStart < 0)
@@ -78,8 +90,7 @@ bool CompositionState::Backspace(InputMode mode, const RomajiKanaConverter& conv
 
     _rawInput.erase(_rawInput.begin() + eraseStart, _rawInput.begin() + _rawCursor);
     _rawCursor = eraseStart;
-    _candidates.clear();
-    _selectedCandidateIndex = -1;
+    ResetConversionSession();
     _phase = _rawInput.empty() ? CompositionPhase::Idle : CompositionPhase::Composing;
     RebuildTexts(mode, converter);
 
@@ -88,14 +99,36 @@ bool CompositionState::Backspace(InputMode mode, const RomajiKanaConverter& conv
 
 bool CompositionState::Delete(InputMode mode, const RomajiKanaConverter& converter)
 {
+    SyncRawCursorFromCaret(mode, converter);
+
     if (_rawInput.empty() || _rawCursor >= static_cast<LONG>(_rawInput.size()))
     {
         return false;
     }
 
-    _rawInput.erase(_rawInput.begin() + _rawCursor);
-    _candidates.clear();
-    _selectedCandidateIndex = -1;
+    LONG eraseEnd = _rawCursor + 1;
+    if (mode == InputMode::Hiragana ||
+        mode == InputMode::HalfwidthKatakana ||
+        mode == InputMode::FullwidthKatakana)
+    {
+        const LONG currentCaret = std::max<LONG>(0, _caretPosition);
+        const LONG nextCaret = std::min<LONG>(
+            static_cast<LONG>(BuildPreeditText(_rawInput, mode, converter).size()),
+            currentCaret + 1);
+        eraseEnd = RawCursorFromVisibleCursor(_rawInput, nextCaret, mode, converter);
+        if (eraseEnd <= _rawCursor)
+        {
+            eraseEnd = _rawCursor + 1;
+        }
+    }
+
+    if (eraseEnd > static_cast<LONG>(_rawInput.size()))
+    {
+        eraseEnd = static_cast<LONG>(_rawInput.size());
+    }
+
+    _rawInput.erase(_rawInput.begin() + _rawCursor, _rawInput.begin() + eraseEnd);
+    ResetConversionSession();
     _phase = _rawInput.empty() ? CompositionPhase::Idle : CompositionPhase::Composing;
     RebuildTexts(mode, converter);
 
@@ -104,29 +137,43 @@ bool CompositionState::Delete(InputMode mode, const RomajiKanaConverter& convert
 
 bool CompositionState::MoveLeft(InputMode mode, const RomajiKanaConverter& converter)
 {
-    if (_rawCursor <= 0)
+    if (_phase == CompositionPhase::Converting || _phase == CompositionPhase::CandidateSelecting)
     {
-        _rawCursor = 0;
+        return MoveFocusLeft();
+    }
+
+    if (_caretPosition <= 0)
+    {
+        _caretPosition = 0;
+        SyncRawCursorFromCaret(mode, converter);
         RebuildTexts(mode, converter);
         return false;
     }
 
-    --_rawCursor;
+    --_caretPosition;
+    SyncRawCursorFromCaret(mode, converter);
     RebuildTexts(mode, converter);
     return true;
 }
 
 bool CompositionState::MoveRight(InputMode mode, const RomajiKanaConverter& converter)
 {
-    LONG end = static_cast<LONG>(_rawInput.size());
-    if (_rawCursor >= end)
+    if (_phase == CompositionPhase::Converting || _phase == CompositionPhase::CandidateSelecting)
     {
-        _rawCursor = end;
+        return MoveFocusRight();
+    }
+
+    const LONG end = static_cast<LONG>(BuildPreeditText(_rawInput, mode, converter).size());
+    if (_caretPosition >= end)
+    {
+        _caretPosition = end;
+        SyncRawCursorFromCaret(mode, converter);
         RebuildTexts(mode, converter);
         return false;
     }
 
-    ++_rawCursor;
+    ++_caretPosition;
+    SyncRawCursorFromCaret(mode, converter);
     RebuildTexts(mode, converter);
     return true;
 }
@@ -138,7 +185,8 @@ bool CompositionState::Empty() const
 
 bool CompositionState::HasCandidates() const
 {
-    return !_candidates.empty();
+    const Segment* segment = GetFocusedSegment();
+    return segment != nullptr && !segment->candidates.empty();
 }
 
 const std::wstring& CompositionState::GetRawInput() const
@@ -156,9 +204,19 @@ const std::wstring& CompositionState::GetPreedit() const
     return _preedit;
 }
 
+const std::vector<LONG>& CompositionState::GetBoundaries() const
+{
+    return _boundaries;
+}
+
 LONG CompositionState::GetRawCursor() const
 {
     return _rawCursor;
+}
+
+LONG CompositionState::GetCaretPosition() const
+{
+    return _caretPosition;
 }
 
 LONG CompositionState::GetPreeditCursor() const
@@ -176,131 +234,265 @@ CompositionPhase CompositionState::GetPhase() const
     return _phase;
 }
 
-std::vector<std::wstring>& CompositionState::MutableCandidates()
-{
-    return _candidates;
-}
-
 const std::vector<std::wstring>& CompositionState::GetCandidates() const
 {
-    return _candidates;
+    const Segment* segment = GetFocusedSegment();
+    return (segment != nullptr) ? segment->candidates : EmptyCandidates();
 }
 
-void CompositionState::StartConversion(const std::vector<std::wstring>& candidates)
+bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConverter, InputMode mode, const RomajiKanaConverter& converter)
 {
-    _candidates = candidates;
-    if (_candidates.empty())
-    {
-        _selectedCandidateIndex = -1;
-        return;
-    }
-
-    _selectedCandidateIndex = 0;
-    _preedit = _candidates[0];
-    _preeditCursor = static_cast<LONG>(_preedit.size());
-    _phase = CompositionPhase::Converting;
-    SyncLegacyBuffer();
-}
-
-void CompositionState::EnterCandidateSelecting()
-{
-    if (!_candidates.empty())
-    {
-        if (_candidates.size() >= 2)
-        {
-            _selectedCandidateIndex = 1;
-        }
-        else
-        {
-            _selectedCandidateIndex = 0;
-        }
-
-        _preedit = _candidates[_selectedCandidateIndex];
-        _preeditCursor = static_cast<LONG>(_preedit.size());
-        _phase = CompositionPhase::CandidateSelecting;
-        SyncLegacyBuffer();
-    }
-}
-
-bool CompositionState::SelectNextCandidate()
-{
-    if (_candidates.empty())
+    if (_rawInput.empty())
     {
         return false;
     }
 
-    _selectedCandidateIndex = (_selectedCandidateIndex + 1) % static_cast<int>(_candidates.size());
-    _preedit = _candidates[_selectedCandidateIndex];
-    _preeditCursor = static_cast<LONG>(_preedit.size());
+    SyncRawCursorFromCaret(mode, converter);
+
+    ConversionSession session;
+    session.originalCaretPosition = _caretPosition;
+
+    const LONG readingCaret = GetReadingCursor(converter);
+    const std::vector<LONG> normalizedBoundaries = NormalizeBoundaries(_reading, _boundaries);
+
+    LONG start = 0;
+    for (LONG boundary : normalizedBoundaries)
+    {
+        if (boundary <= start)
+        {
+            continue;
+        }
+
+        Segment segment;
+        segment.start = start;
+        segment.end = boundary;
+        segment.rawText = _reading.substr(start, boundary - start);
+
+        const LONG rawStart = RawCursorFromVisibleCursor(_rawInput, start, InputMode::Hiragana, converter);
+        const LONG rawEnd = RawCursorFromVisibleCursor(_rawInput, boundary, InputMode::Hiragana, converter);
+        const std::wstring rawSegment = _rawInput.substr(rawStart, rawEnd - rawStart);
+
+        segment.candidates = kanaKanjiConverter.GenerateCandidates(
+            segment.rawText,
+            BuildPreeditText(rawSegment, InputMode::FullwidthKatakana, converter),
+            rawSegment,
+            ToFullwidth(rawSegment));
+
+        if (!segment.candidates.empty())
+        {
+            segment.selectedCandidateIndex = 0;
+            segment.currentDisplayText = segment.candidates[0];
+        }
+        else
+        {
+            segment.selectedCandidateIndex = -1;
+            segment.currentDisplayText = segment.rawText;
+        }
+
+        session.segments.push_back(segment);
+        start = boundary;
+    }
+
+    if (session.segments.empty())
+    {
+        return false;
+    }
+
+    UNREFERENCED_PARAMETER(readingCaret);
+    session.focusedSegmentIndex = -1;
+    _conversionSession = session;
+    _phase = CompositionPhase::Converting;
+    RebuildConversionDisplay();
+    return true;
+}
+
+void CompositionState::EnterCandidateSelecting()
+{
+    if (HasFocusedSegment())
+    {
+        _phase = CompositionPhase::CandidateSelecting;
+    }
+}
+
+bool CompositionState::BeginSegmentSelection()
+{
+    const int focusIndex = FindFirstUncommittedSegment();
+    if (focusIndex < 0)
+    {
+        return false;
+    }
+
+    _conversionSession.focusedSegmentIndex = focusIndex;
     _phase = CompositionPhase::CandidateSelecting;
-    SyncLegacyBuffer();
+    RebuildConversionDisplay();
+    return true;
+}
+
+bool CompositionState::SelectNextCandidate()
+{
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr || segment->candidates.empty())
+    {
+        return false;
+    }
+
+    int nextIndex = segment->selectedCandidateIndex + 1;
+    if (nextIndex >= static_cast<int>(segment->candidates.size()))
+    {
+        nextIndex = 0;
+    }
+
+    UpdateSegmentSelection(*segment, nextIndex);
+    _phase = CompositionPhase::CandidateSelecting;
+    RebuildConversionDisplay();
     return true;
 }
 
 bool CompositionState::SelectPrevCandidate()
 {
-    if (_candidates.empty())
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr || segment->candidates.empty())
     {
         return false;
     }
 
-    if (_selectedCandidateIndex <= 0)
+    int nextIndex = segment->selectedCandidateIndex - 1;
+    if (nextIndex < 0)
     {
-        _selectedCandidateIndex = static_cast<int>(_candidates.size()) - 1;
-    }
-    else
-    {
-        --_selectedCandidateIndex;
+        nextIndex = static_cast<int>(segment->candidates.size()) - 1;
     }
 
-    _preedit = _candidates[_selectedCandidateIndex];
-    _preeditCursor = static_cast<LONG>(_preedit.size());
+    UpdateSegmentSelection(*segment, nextIndex);
     _phase = CompositionPhase::CandidateSelecting;
-    SyncLegacyBuffer();
+    RebuildConversionDisplay();
     return true;
 }
 
 bool CompositionState::SelectFirstCandidate()
 {
-    if (_candidates.empty())
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr || segment->candidates.empty())
     {
         return false;
     }
 
-    _selectedCandidateIndex = 0;
-    _preedit = _candidates[_selectedCandidateIndex];
-    _preeditCursor = static_cast<LONG>(_preedit.size());
+    UpdateSegmentSelection(*segment, 0);
     _phase = CompositionPhase::CandidateSelecting;
-    SyncLegacyBuffer();
+    RebuildConversionDisplay();
     return true;
 }
 
 bool CompositionState::SelectLastCandidate()
 {
-    if (_candidates.empty())
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr || segment->candidates.empty())
     {
         return false;
     }
 
-    _selectedCandidateIndex = static_cast<int>(_candidates.size()) - 1;
-    _preedit = _candidates[_selectedCandidateIndex];
-    _preeditCursor = static_cast<LONG>(_preedit.size());
+    UpdateSegmentSelection(*segment, static_cast<int>(segment->candidates.size()) - 1);
     _phase = CompositionPhase::CandidateSelecting;
-    SyncLegacyBuffer();
+    RebuildConversionDisplay();
     return true;
+}
+
+bool CompositionState::MoveFocusLeft()
+{
+    if (!HasFocusedSegment())
+    {
+        return false;
+    }
+
+    const int previousFocus = FindPrevUncommittedSegment(_conversionSession.focusedSegmentIndex - 1);
+    if (previousFocus < 0)
+    {
+        return false;
+    }
+
+    _conversionSession.focusedSegmentIndex = previousFocus;
+    if (_phase == CompositionPhase::Converting || _phase == CompositionPhase::CandidateSelecting)
+    {
+        RebuildConversionDisplay();
+    }
+    return true;
+}
+
+bool CompositionState::MoveFocusRight()
+{
+    if (!HasFocusedSegment())
+    {
+        return false;
+    }
+
+    const int nextFocus = FindNextUncommittedSegment(_conversionSession.focusedSegmentIndex + 1);
+    if (nextFocus < 0)
+    {
+        return false;
+    }
+
+    _conversionSession.focusedSegmentIndex = nextFocus;
+    if (_phase == CompositionPhase::Converting || _phase == CompositionPhase::CandidateSelecting)
+    {
+        RebuildConversionDisplay();
+    }
+    return true;
+}
+
+bool CompositionState::CommitFocusedSegment()
+{
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr)
+    {
+        return false;
+    }
+
+    segment->isCommitted = true;
+
+    const int nextFocus = FindNextUncommittedSegment(_conversionSession.focusedSegmentIndex + 1);
+    if (nextFocus >= 0)
+    {
+        _conversionSession.focusedSegmentIndex = nextFocus;
+        _phase = CompositionPhase::CandidateSelecting;
+    }
+    else
+    {
+        _conversionSession.focusedSegmentIndex = -1;
+        _phase = CompositionPhase::Converting;
+    }
+
+    RebuildConversionDisplay();
+    return true;
+}
+
+bool CompositionState::HasFocusedSegment() const
+{
+    return GetFocusedSegment() != nullptr;
+}
+
+bool CompositionState::HasUncommittedSegments() const
+{
+    for (const Segment& segment : _conversionSession.segments)
+    {
+        if (!segment.isCommitted)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool CompositionState::HasSelectedCandidate() const
 {
-    return _selectedCandidateIndex >= 0 &&
-        _selectedCandidateIndex < static_cast<int>(_candidates.size());
+    return !_conversionSession.segments.empty();
 }
 
 const std::wstring& CompositionState::GetSelectedCandidate() const
 {
-    if (HasSelectedCandidate())
+    const Segment* segment = GetFocusedSegment();
+    if (segment != nullptr)
     {
-        return _candidates[_selectedCandidateIndex];
+        return segment->currentDisplayText;
     }
 
     return _preedit;
@@ -308,10 +500,33 @@ const std::wstring& CompositionState::GetSelectedCandidate() const
 
 void CompositionState::CancelConversion(InputMode mode, const RomajiKanaConverter& converter)
 {
-    _candidates.clear();
-    _selectedCandidateIndex = -1;
+    if (!_conversionSession.segments.empty())
+    {
+        _caretPosition = _conversionSession.originalCaretPosition;
+    }
+
+    ResetConversionSession();
     _phase = _rawInput.empty() ? CompositionPhase::Idle : CompositionPhase::Composing;
     RebuildTexts(mode, converter);
+}
+
+std::vector<CompositionState::DisplaySpan> CompositionState::GetDisplaySpans() const
+{
+    std::vector<DisplaySpan> spans;
+    LONG cursor = 0;
+
+    for (size_t i = 0; i < _conversionSession.segments.size(); ++i)
+    {
+        const Segment& segment = _conversionSession.segments[i];
+        DisplaySpan span;
+        span.start = cursor;
+        cursor += static_cast<LONG>(segment.currentDisplayText.size());
+        span.end = cursor;
+        span.focused = (static_cast<int>(i) == _conversionSession.focusedSegmentIndex);
+        spans.push_back(span);
+    }
+
+    return spans;
 }
 
 std::wstring CompositionState::GetHiraganaText(const RomajiKanaConverter& converter) const
@@ -336,12 +551,20 @@ std::wstring CompositionState::GetFullwidthRomanText() const
 
 int CompositionState::GetSelectedCandidateIndex() const
 {
-    return _selectedCandidateIndex;
+    const Segment* segment = GetFocusedSegment();
+    return (segment != nullptr) ? segment->selectedCandidateIndex : -1;
 }
 
 void CompositionState::SetSelectedCandidateIndex(int index)
 {
-    _selectedCandidateIndex = index;
+    Segment* segment = GetFocusedSegment();
+    if (segment == nullptr)
+    {
+        return;
+    }
+
+    UpdateSegmentSelection(*segment, index);
+    RebuildConversionDisplay();
 }
 
 void CompositionState::RebuildTexts(InputMode mode, const RomajiKanaConverter& converter)
@@ -349,11 +572,152 @@ void CompositionState::RebuildTexts(InputMode mode, const RomajiKanaConverter& c
     _reading = converter.ConvertFromRaw(_rawInput);
     _preedit = BuildPreeditText(_rawInput, mode, converter);
 
-    std::wstring rawPrefix = _rawInput.substr(0, _rawCursor);
-    std::wstring preeditPrefix = BuildPreeditText(rawPrefix, mode, converter);
-    _preeditCursor = static_cast<LONG>(preeditPrefix.size());
-
+    SyncCaretFromRawCursor(mode, converter);
+    _preeditCursor = _caretPosition;
+    RebuildBoundaries();
     SyncLegacyBuffer();
+}
+
+void CompositionState::RebuildBoundaries()
+{
+    _boundaries = BuildDefaultBoundaries(_reading);
+}
+
+void CompositionState::RebuildConversionDisplay()
+{
+    std::wstring converted;
+    LONG focusCursor = 0;
+
+    for (size_t i = 0; i < _conversionSession.segments.size(); ++i)
+    {
+        converted += _conversionSession.segments[i].currentDisplayText;
+        if (static_cast<int>(i) == _conversionSession.focusedSegmentIndex)
+        {
+            focusCursor = static_cast<LONG>(converted.size());
+        }
+    }
+
+    _preedit = converted;
+    _preeditCursor = focusCursor;
+    SyncLegacyBuffer();
+}
+
+void CompositionState::ResetConversionSession()
+{
+    _conversionSession.segments.clear();
+    _conversionSession.focusedSegmentIndex = -1;
+    _conversionSession.originalCaretPosition = 0;
+}
+
+void CompositionState::SyncRawCursorFromCaret(InputMode mode, const RomajiKanaConverter& converter)
+{
+    const LONG visibleLength = static_cast<LONG>(BuildPreeditText(_rawInput, mode, converter).size());
+    if (_caretPosition < 0)
+    {
+        _caretPosition = 0;
+    }
+    if (_caretPosition > visibleLength)
+    {
+        _caretPosition = visibleLength;
+    }
+
+    _rawCursor = RawCursorFromVisibleCursor(_rawInput, _caretPosition, mode, converter);
+}
+
+void CompositionState::SyncCaretFromRawCursor(InputMode mode, const RomajiKanaConverter& converter)
+{
+    if (_rawCursor < 0)
+    {
+        _rawCursor = 0;
+    }
+    if (_rawCursor > static_cast<LONG>(_rawInput.size()))
+    {
+        _rawCursor = static_cast<LONG>(_rawInput.size());
+    }
+
+    const std::wstring visiblePrefix = BuildPreeditText(_rawInput.substr(0, _rawCursor), mode, converter);
+    _caretPosition = static_cast<LONG>(visiblePrefix.size());
+}
+
+LONG CompositionState::GetReadingCursor(const RomajiKanaConverter& converter) const
+{
+    const std::wstring readingPrefix = converter.ConvertFromRaw(_rawInput.substr(0, _rawCursor));
+    return static_cast<LONG>(readingPrefix.size());
+}
+
+int CompositionState::FindPrevUncommittedSegment(int startIndex) const
+{
+    for (int index = startIndex; index >= 0; --index)
+    {
+        if (!_conversionSession.segments[index].isCommitted)
+        {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+int CompositionState::FindFirstUncommittedSegment() const
+{
+    return FindNextUncommittedSegment(0);
+}
+
+int CompositionState::FindNextUncommittedSegment(int startIndex) const
+{
+    for (int index = startIndex; index < static_cast<int>(_conversionSession.segments.size()); ++index)
+    {
+        if (!_conversionSession.segments[index].isCommitted)
+        {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+CompositionState::Segment* CompositionState::GetFocusedSegment()
+{
+    if (_conversionSession.focusedSegmentIndex < 0 ||
+        _conversionSession.focusedSegmentIndex >= static_cast<int>(_conversionSession.segments.size()))
+    {
+        return nullptr;
+    }
+
+    return &_conversionSession.segments[_conversionSession.focusedSegmentIndex];
+}
+
+const CompositionState::Segment* CompositionState::GetFocusedSegment() const
+{
+    if (_conversionSession.focusedSegmentIndex < 0 ||
+        _conversionSession.focusedSegmentIndex >= static_cast<int>(_conversionSession.segments.size()))
+    {
+        return nullptr;
+    }
+
+    return &_conversionSession.segments[_conversionSession.focusedSegmentIndex];
+}
+
+void CompositionState::UpdateSegmentSelection(Segment& segment, int index)
+{
+    if (segment.candidates.empty())
+    {
+        segment.selectedCandidateIndex = -1;
+        segment.currentDisplayText = segment.rawText;
+        return;
+    }
+
+    if (index < 0)
+    {
+        index = 0;
+    }
+    if (index >= static_cast<int>(segment.candidates.size()))
+    {
+        index = static_cast<int>(segment.candidates.size()) - 1;
+    }
+
+    segment.selectedCandidateIndex = index;
+    segment.currentDisplayText = segment.candidates[index];
 }
 
 void CompositionState::SyncLegacyBuffer()
@@ -389,11 +753,11 @@ LONG CompositionState::RawCursorFromVisibleCursor(const std::wstring& raw, LONG 
     }
 
     LONG bestRaw = 0;
-    LONG rawLength = static_cast<LONG>(raw.size());
+    const LONG rawLength = static_cast<LONG>(raw.size());
     for (LONG rawCursor = 0; rawCursor <= rawLength; ++rawCursor)
     {
         const std::wstring visiblePrefix = BuildPreeditText(raw.substr(0, rawCursor), mode, converter);
-        LONG currentVisibleCursor = static_cast<LONG>(visiblePrefix.size());
+        const LONG currentVisibleCursor = static_cast<LONG>(visiblePrefix.size());
         if (currentVisibleCursor <= visibleCursor)
         {
             bestRaw = rawCursor;
@@ -404,6 +768,78 @@ LONG CompositionState::RawCursorFromVisibleCursor(const std::wstring& raw, LONG 
     }
 
     return bestRaw;
+}
+
+std::vector<LONG> CompositionState::NormalizeBoundaries(const std::wstring& text, const std::vector<LONG>& boundaries)
+{
+    std::vector<LONG> result = boundaries;
+    const LONG textLength = static_cast<LONG>(text.size());
+
+    result.erase(
+        std::remove_if(
+            result.begin(),
+            result.end(),
+            [textLength](LONG boundary)
+            {
+                return boundary <= 0 || boundary >= textLength;
+            }),
+        result.end());
+
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    result.push_back(textLength);
+    return result;
+}
+
+std::vector<LONG> CompositionState::BuildDefaultBoundaries(const std::wstring& text)
+{
+    std::vector<LONG> boundaries;
+    const LONG textLength = static_cast<LONG>(text.size());
+    LONG segmentStart = 0;
+
+    for (LONG index = 0; index < textLength; ++index)
+    {
+        if (!IsParticleBoundaryCandidate(text[index]))
+        {
+            continue;
+        }
+
+        if (index > segmentStart)
+        {
+            boundaries.push_back(index);
+        }
+
+        boundaries.push_back(index + 1);
+        segmentStart = index + 1;
+    }
+
+    return NormalizeBoundaries(text, boundaries);
+}
+
+bool CompositionState::IsParticleBoundaryCandidate(WCHAR ch)
+{
+    switch (ch)
+    {
+    case 0x306F:
+    case 0x304C:
+    case 0x3092:
+    case 0x306B:
+    case 0x3067:
+    case 0x3068:
+    case 0x3078:
+    case 0x3082:
+    case 0x3084:
+    case 0x306E:
+    case 0x306D:
+    case 0x3088:
+    case 0x304B:
+    case 0x306A:
+    case 0x3001:
+    case 0x3002:
+        return true;
+    default:
+        return false;
+    }
 }
 
 std::wstring CompositionState::ToFullwidth(const std::wstring& src)

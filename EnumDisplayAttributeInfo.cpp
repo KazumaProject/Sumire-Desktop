@@ -149,7 +149,7 @@ STDAPI CEnumDisplayAttributeInfo::Next(ULONG ulCount, ITfDisplayAttributeInfo **
 
     while (cFetched < ulCount)
     {
-        if (_iIndex > 1)
+        if (_iIndex > 2)
             break;
 
         if (_iIndex == 0)
@@ -161,9 +161,12 @@ STDAPI CEnumDisplayAttributeInfo::Next(ULONG ulCount, ITfDisplayAttributeInfo **
         {
             if ((pDisplayAttributeInfo = new CDisplayAttributeInfoConverted()) == NULL)
                 return E_OUTOFMEMORY;
- 
         }
-        
+        else
+        {
+            if ((pDisplayAttributeInfo = new CDisplayAttributeInfoFocusedConverted()) == NULL)
+                return E_OUTOFMEMORY;
+        }
 
         *rgInfo = pDisplayAttributeInfo;
         cFetched++;

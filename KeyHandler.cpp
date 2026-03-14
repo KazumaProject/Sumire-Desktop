@@ -174,7 +174,7 @@ HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
         return S_OK;
     }
 
-    if (phase == CompositionPhase::Converting || phase == CompositionPhase::CandidateSelecting)
+    if (phase == CompositionPhase::CandidateSelecting || phase == CompositionPhase::Converting)
     {
         return _CommitCurrentCandidate(ec, pContext);
     }
@@ -204,27 +204,26 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 
     if (phase == CompositionPhase::Converting)
     {
-        _compositionState.EnterCandidateSelecting();
+        if (!_compositionState.BeginSegmentSelection())
+        {
+            return S_OK;
+        }
+
         _compositionPhase = _compositionState.GetPhase();
         HRESULT hr = _UpdateCompositionText(ec, pContext);
         if (FAILED(hr))
         {
             return hr;
         }
+
         return _ShowCandidateList(ec, pContext);
     }
 
-    std::vector<std::wstring> candidates = _kanaKanjiConverter.GenerateCandidates(
-        _compositionState.GetReading(),
-        _compositionState.GetKatakanaText(_romajiConverter),
-        _compositionState.GetHalfwidthRomanText(),
-        _compositionState.GetFullwidthRomanText());
-    if (candidates.empty())
+    if (!_compositionState.StartConversion(_kanaKanjiConverter, GetEffectiveInputMode(), _romajiConverter))
     {
         return S_OK;
     }
 
-    _compositionState.StartConversion(candidates);
     _compositionPhase = _compositionState.GetPhase();
     return _UpdateCompositionText(ec, pContext);
 }
@@ -247,17 +246,20 @@ HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPA
     CompositionPhase phase = _compositionState.GetPhase();
     if (phase == CompositionPhase::CandidateSelecting)
     {
-        if (wParam == VK_LEFT)
+        bool moved = (wParam == VK_LEFT)
+            ? _compositionState.MoveFocusLeft()
+            : _compositionState.MoveFocusRight();
+        _compositionPhase = _compositionState.GetPhase();
+        if (!moved)
         {
-            return _SelectFirstCandidate(ec, pContext);
+            return S_OK;
         }
-
-        return _SelectLastCandidate(ec, pContext);
+        return _UpdateCompositionText(ec, pContext);
     }
 
     if (phase == CompositionPhase::Converting)
     {
-        _CancelConversion(ec, pContext);
+        return S_OK;
     }
 
     InputMode mode = GetEffectiveInputMode();
