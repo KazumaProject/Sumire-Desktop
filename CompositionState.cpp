@@ -552,7 +552,11 @@ const std::vector<CompositionState::RechunkOption>& CompositionState::GetRechunk
         : EmptyRechunkOptions();
 }
 
-bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConverter, InputMode mode, const RomajiKanaConverter& converter)
+bool CompositionState::StartConversion(
+    const KanaKanjiConverter& kanaKanjiConverter,
+    InputMode mode,
+    const RomajiKanaConverter& converter,
+    const std::wstring& leftContext)
 {
     if (_rawInput.empty())
     {
@@ -621,7 +625,9 @@ bool CompositionState::StartConversion(const KanaKanjiConverter& kanaKanjiConver
         return true;
     }
 
-    const ConversionResult result = kanaKanjiConverter.Convert(_reading);
+    KanaKanjiConverter::ConvertOptions convertOptions;
+    convertOptions.leftContext = leftContext;
+    const ConversionResult result = kanaKanjiConverter.Convert(_reading, convertOptions);
     if (result.candidates.empty())
     {
         return false;

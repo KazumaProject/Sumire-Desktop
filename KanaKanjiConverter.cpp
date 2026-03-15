@@ -690,7 +690,14 @@ ConversionResult KanaKanjiConverter::Convert(
         }
 
         const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 800u : 1200u;
-        return BuildZenzOnlyResult(reading, _zenzClient->Generate(reading, timeoutMs, shouldCancel));
+        return BuildZenzOnlyResult(
+            reading,
+            _zenzClient->Generate(
+                reading,
+                options.leftContext,
+                timeoutMs,
+                shouldCancel,
+                options.onZenzPartial));
     }
 
     const int kInf = std::numeric_limits<int>::max() / 8;
@@ -888,7 +895,12 @@ ConversionResult KanaKanjiConverter::Convert(
     if (zenzEnabled)
     {
         const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
-        const std::wstring generated = _zenzClient->Generate(reading, timeoutMs, shouldCancel);
+        const std::wstring generated = _zenzClient->Generate(
+            reading,
+            options.leftContext,
+            timeoutMs,
+            shouldCancel,
+            options.onZenzPartial);
         FuseZenzCandidate(reading, generated, &result);
     }
 
@@ -914,4 +926,12 @@ ConversionResult KanaKanjiConverter::Convert(
 bool KanaKanjiConverter::IsZenzEnabled() const
 {
     return _zenzClient != nullptr && _zenzClient->IsEnabled();
+}
+
+void KanaKanjiConverter::WarmUpZenzAsync() const
+{
+    if (_zenzClient != nullptr)
+    {
+        _zenzClient->WarmUpAsync();
+    }
 }

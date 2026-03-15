@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "SumireSettingsStore.h"
@@ -111,6 +113,11 @@ bool IsServiceEnabledInSettings()
 {
     return SumireSettingsStore::Load().zenzServiceEnabled;
 }
+
+bool SendRequestHeader(HANDLE pipe, const ZenzProtocol::RequestHeader& request)
+{
+    return WriteAll(pipe, &request, sizeof(request));
+}
 }
 
 ZenzClient::ZenzClient(Config config)
@@ -120,8 +127,10 @@ ZenzClient::ZenzClient(Config config)
 
 std::wstring ZenzClient::Generate(
     const std::wstring& reading,
+    const std::wstring& leftContext,
     DWORD timeoutMs,
-    const std::function<bool()>& shouldCancel) const
+    const std::function<bool()>& shouldCancel,
+    const std::function<void(const std::wstring&)>& onPartial) const
 {
     const std::wstring modelPath = ResolveModelPath();
     if (!_config.enabled || !IsServiceEnabledInSettings() || reading.empty() || modelPath.empty())
@@ -162,12 +171,14 @@ std::wstring ZenzClient::Generate(
 
     ZenzProtocol::RequestHeader request;
     request.readingChars = static_cast<std::uint32_t>(reading.size());
+    request.leftContextChars = static_cast<std::uint32_t>(leftContext.size());
     request.modelPathChars = static_cast<std::uint32_t>(modelPath.size());
     request.modelRepoChars = static_cast<std::uint32_t>(_config.modelRepo.size());
     request.timeoutMs = timeoutMs;
 
     bool ok = WriteAll(pipe, &request, sizeof(request)) &&
         WriteWideString(pipe, reading) &&
+        WriteWideString(pipe, leftContext) &&
         WriteWideString(pipe, modelPath) &&
         WriteWideString(pipe, _config.modelRepo);
     if (ok)
@@ -178,15 +189,129 @@ std::wstring ZenzClient::Generate(
     std::wstring generated;
     if (ok)
     {
-        ZenzProtocol::ResponseHeader response;
-        ok = ReadAll(pipe, &response, sizeof(response)) &&
-            response.version == ZenzProtocol::kVersion &&
-            response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Ok) &&
-            ReadWideString(pipe, response.resultChars, &generated);
+        for (;;)
+        {
+            if (shouldCancel && shouldCancel())
+            {
+                ok = false;
+                break;
+            }
+
+            ZenzProtocol::ResponseHeader response;
+            if (!ReadAll(pipe, &response, sizeof(response)) || response.version != ZenzProtocol::kVersion)
+            {
+                ok = false;
+                break;
+            }
+
+            std::wstring chunk;
+            if (!ReadWideString(pipe, response.resultChars, &chunk))
+            {
+                ok = false;
+                break;
+            }
+
+            if (response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Partial))
+            {
+                generated = std::move(chunk);
+                if (onPartial)
+                {
+                    onPartial(generated);
+                }
+                continue;
+            }
+
+            ok = response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Ok);
+            if (ok)
+            {
+                generated = std::move(chunk);
+            }
+            break;
+        }
     }
 
     CloseHandle(pipe);
     return ok ? generated : L"";
+}
+
+void ZenzClient::WarmUpAsync() const
+{
+    const std::wstring modelPath = ResolveModelPath();
+    if (!_config.enabled || !IsServiceEnabledInSettings() || modelPath.empty())
+    {
+        return;
+    }
+
+    static std::mutex warmUpMutex;
+    static std::unordered_set<std::wstring> warmingModels;
+    {
+        std::lock_guard<std::mutex> lock(warmUpMutex);
+        if (warmingModels.find(modelPath) != warmingModels.end())
+        {
+            return;
+        }
+        warmingModels.insert(modelPath);
+    }
+
+    const Config config = _config;
+    std::thread([modelPath, config]()
+    {
+        ZenzClient client(config);
+        bool keepMarked = true;
+        if (client.EnsureServiceRunning(1500))
+        {
+            HANDLE pipe = CreateFileW(
+                ZenzProtocol::kPipeName,
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                nullptr,
+                OPEN_EXISTING,
+                0,
+                nullptr);
+            if (pipe != INVALID_HANDLE_VALUE)
+            {
+                ZenzProtocol::RequestHeader request;
+                request.command = static_cast<std::uint32_t>(ZenzProtocol::Command::WarmUp);
+                request.modelPathChars = static_cast<std::uint32_t>(modelPath.size());
+                request.modelRepoChars = static_cast<std::uint32_t>(config.modelRepo.size());
+
+                const bool ok = SendRequestHeader(pipe, request) &&
+                    WriteWideString(pipe, std::wstring()) &&
+                    WriteWideString(pipe, std::wstring()) &&
+                    WriteWideString(pipe, modelPath) &&
+                    WriteWideString(pipe, config.modelRepo);
+                if (ok)
+                {
+                    FlushFileBuffers(pipe);
+                    ZenzProtocol::ResponseHeader response;
+                    keepMarked =
+                        ReadAll(pipe, &response, sizeof(response)) &&
+                        response.version == ZenzProtocol::kVersion &&
+                        response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Ok);
+                }
+                else
+                {
+                    keepMarked = false;
+                }
+
+                CloseHandle(pipe);
+            }
+            else
+            {
+                keepMarked = false;
+            }
+        }
+        else
+        {
+            keepMarked = false;
+        }
+
+        if (!keepMarked)
+        {
+            std::lock_guard<std::mutex> lock(warmUpMutex);
+            warmingModels.erase(modelPath);
+        }
+    }).detach();
 }
 
 bool ZenzClient::IsEnabled() const

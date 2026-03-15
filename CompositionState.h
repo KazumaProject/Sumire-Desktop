@@ -122,7 +122,11 @@ public:
     const std::vector<ConversionCandidate>& GetConversionCandidates() const;
     const std::vector<CandidateItem>& GetCandidateItems() const;
     const std::vector<RechunkOption>& GetRechunkOptions() const;
-    bool StartConversion(const KanaKanjiConverter& kanaKanjiConverter, InputMode mode, const RomajiKanaConverter& converter);
+    bool StartConversion(
+        const KanaKanjiConverter& kanaKanjiConverter,
+        InputMode mode,
+        const RomajiKanaConverter& converter,
+        const std::wstring& leftContext = std::wstring());
     void EnterCandidateSelecting();
     bool BeginSegmentSelection();
     bool BeginRechunkSelection(const RomajiKanaConverter& converter);

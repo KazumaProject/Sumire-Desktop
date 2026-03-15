@@ -26,6 +26,83 @@ constexpr UINT WM_SUMIRE_LIVE_CONVERSION_READY = WM_APP + 0x120;
 const wchar_t kLiveConversionWindowClassName[] = L"SumireLiveConversionWindow";
 const wchar_t kLiveConversionSourceViewWindowClassName[] = L"SumireLiveConversionSourceViewWindow";
 constexpr auto kLiveConversionDebounce = std::chrono::milliseconds(45);
+constexpr LONG kMaxZenzLeftContextChars = 48;
+
+std::wstring NormalizeLeftContextText(const std::wstring& text)
+{
+    std::wstring normalized;
+    normalized.reserve(text.size());
+    for (wchar_t ch : text)
+    {
+        if (ch == L'\r' || ch == L'\n' || ch == L'\t')
+        {
+            normalized.push_back(L' ');
+        }
+        else if (ch >= 0x20)
+        {
+            normalized.push_back(ch);
+        }
+    }
+
+    if (normalized.size() > static_cast<size_t>(kMaxZenzLeftContextChars))
+    {
+        normalized.erase(0, normalized.size() - static_cast<size_t>(kMaxZenzLeftContextChars));
+    }
+    return normalized;
+}
+
+void AppendSignaturePart(std::wstring* signature, const std::wstring& value)
+{
+    if (signature == nullptr)
+    {
+        return;
+    }
+
+    signature->append(value);
+    signature->push_back(L'\x1f');
+}
+
+std::wstring BuildConverterSettingsSignature(const SumireSettingsStore::Settings& settings)
+{
+    std::wstring signature;
+    AppendSignaturePart(&signature, settings.romajiMapPath);
+    AppendSignaturePart(&signature, settings.zenzEnabled ? L"1" : L"0");
+    AppendSignaturePart(&signature, settings.zenzServiceEnabled ? L"1" : L"0");
+    AppendSignaturePart(&signature, settings.zenzModelPreset);
+    AppendSignaturePart(&signature, settings.zenzModelPath);
+    AppendSignaturePart(&signature, settings.zenzModelRepo);
+
+    for (const SumireSettingsStore::PersonNameDictionaryProfile& profile : settings.personNameDictionaryProfiles)
+    {
+        AppendSignaturePart(&signature, profile.id);
+        AppendSignaturePart(&signature, profile.name);
+        AppendSignaturePart(&signature, profile.sourcePath);
+        AppendSignaturePart(&signature, profile.builtPath);
+        AppendSignaturePart(&signature, profile.enabled ? L"1" : L"0");
+    }
+
+    return signature;
+}
+
+ConversionCandidate BuildLiveConversionZenzCandidate(const std::wstring& reading, const std::wstring& surface)
+{
+    ConversionCandidate candidate;
+    candidate.reading = reading;
+    candidate.surface = surface;
+
+    BunsetsuConversion bunsetsu;
+    bunsetsu.start = 0;
+    bunsetsu.length = static_cast<int>(reading.size());
+    bunsetsu.reading = reading;
+    bunsetsu.surface = surface;
+    bunsetsu.alternatives.push_back(surface);
+    if (surface != reading)
+    {
+        bunsetsu.alternatives.push_back(reading);
+    }
+    candidate.bunsetsu.push_back(std::move(bunsetsu));
+    return candidate;
+}
 
 LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -266,6 +343,7 @@ CTextService::CTextService()
     _liveConversionHasPendingRequest = false;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
+    _liveConversionCompletedIsFinal = false;
     _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
@@ -312,6 +390,7 @@ CTextService::~CTextService()
     _liveConversionHasPendingRequest = false;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
+    _liveConversionCompletedIsFinal = false;
     _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
@@ -692,6 +771,7 @@ BOOL CTextService::_InitLiveConversionAsync()
         for (;;)
         {
             std::wstring reading;
+            std::wstring leftContext;
             std::uint64_t version = 0;
             std::chrono::steady_clock::time_point requestedAt;
             {
@@ -725,18 +805,31 @@ BOOL CTextService::_InitLiveConversionAsync()
                 }
 
                 reading = _liveConversionPendingReading;
+                leftContext = _liveConversionPendingLeftContext;
                 _liveConversionHasPendingRequest = false;
             }
 
             KanaKanjiConverter::ConvertOptions convertOptions;
             convertOptions.useZenz = _kanaKanjiConverter.IsZenzEnabled();
             convertOptions.zenzOnly = convertOptions.useZenz;
+            convertOptions.leftContext = leftContext;
             ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
             {
                 std::lock_guard<std::mutex> lock(_liveConversionMutex);
                 return !_liveConversionWorkerRunning ||
                     version != _liveConversionLatestRequestedVersion;
             }, convertOptions);
+            if (convertOptions.zenzOnly && result.candidates.empty())
+            {
+                convertOptions.useZenz = false;
+                convertOptions.zenzOnly = false;
+                result = _kanaKanjiConverter.Convert(reading, [this, version]()
+                {
+                    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                    return !_liveConversionWorkerRunning ||
+                        version != _liveConversionLatestRequestedVersion;
+                }, convertOptions);
+            }
 
             bool shouldNotify = false;
             {
@@ -747,14 +840,17 @@ BOOL CTextService::_InitLiveConversionAsync()
                 }
 
                 if (version != _liveConversionLatestRequestedVersion ||
-                    reading != _liveConversionLatestRequestedReading)
+                    reading != _liveConversionLatestRequestedReading ||
+                    leftContext != _liveConversionLatestRequestedLeftContext)
                 {
                     continue;
                 }
 
                 _liveConversionCompletedReading = reading;
+                _liveConversionCompletedLeftContext = leftContext;
                 _liveConversionCompletedCandidates = std::move(result.candidates);
                 _liveConversionCompletedVersion = version;
+                _liveConversionCompletedIsFinal = true;
                 shouldNotify = true;
             }
 
@@ -775,9 +871,13 @@ void CTextService::_UninitLiveConversionAsync()
         _liveConversionWorkerRunning = false;
         _liveConversionHasPendingRequest = false;
         _liveConversionPendingReading.clear();
+        _liveConversionPendingLeftContext.clear();
         _liveConversionLatestRequestedReading.clear();
+        _liveConversionLatestRequestedLeftContext.clear();
         _liveConversionCompletedReading.clear();
+        _liveConversionCompletedLeftContext.clear();
         _liveConversionCompletedCandidates.clear();
+        _liveConversionCompletedIsFinal = false;
     }
     _liveConversionCv.notify_all();
 
@@ -793,7 +893,7 @@ void CTextService::_UninitLiveConversionAsync()
     }
 }
 
-void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
+void CTextService::_QueueLiveConversionRequest(const std::wstring& reading, const std::wstring& leftContext)
 {
     std::lock_guard<std::mutex> lock(_liveConversionMutex);
     if (!_liveConversionWorkerRunning)
@@ -802,14 +902,19 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
     }
 
     if (reading == _liveConversionLatestRequestedReading &&
-        (_liveConversionHasPendingRequest || _liveConversionCompletedReading == reading))
+        leftContext == _liveConversionLatestRequestedLeftContext &&
+        (_liveConversionHasPendingRequest ||
+            (_liveConversionCompletedReading == reading &&
+                _liveConversionCompletedLeftContext == leftContext)))
     {
         return;
     }
 
     ++_liveConversionLatestRequestedVersion;
     _liveConversionLatestRequestedReading = reading;
+    _liveConversionLatestRequestedLeftContext = leftContext;
     _liveConversionPendingReading = reading;
+    _liveConversionPendingLeftContext = leftContext;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::now();
     _liveConversionHasPendingRequest = true;
     _liveConversionCv.notify_one();
@@ -820,12 +925,16 @@ void CTextService::_CancelLiveConversionRequests()
     std::lock_guard<std::mutex> lock(_liveConversionMutex);
     ++_liveConversionLatestRequestedVersion;
     _liveConversionLatestRequestedReading.clear();
+    _liveConversionLatestRequestedLeftContext.clear();
     _liveConversionPendingReading.clear();
+    _liveConversionPendingLeftContext.clear();
     _liveConversionHasPendingRequest = false;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _liveConversionCompletedReading.clear();
+    _liveConversionCompletedLeftContext.clear();
     _liveConversionCompletedCandidates.clear();
     _liveConversionCompletedVersion = 0;
+    _liveConversionCompletedIsFinal = false;
 }
 
 bool CTextService::_CanUseLiveConversionPreview() const
@@ -890,7 +999,39 @@ bool CTextService::_IsLiveConversionBusyForCurrentReading(const std::wstring& re
     std::lock_guard<std::mutex> lock(_liveConversionMutex);
     return !reading.empty() &&
         _liveConversionLatestRequestedReading == reading &&
-        _liveConversionCompletedVersion != _liveConversionLatestRequestedVersion;
+        (!_liveConversionCompletedIsFinal ||
+            _liveConversionCompletedVersion != _liveConversionLatestRequestedVersion);
+}
+
+std::wstring CTextService::_GetLeftContextText(TfEditCookie ec, ITfRange* pRangeComposition) const
+{
+    if (pRangeComposition == NULL)
+    {
+        return std::wstring();
+    }
+
+    ITfRange* pLeftRange = NULL;
+    if (pRangeComposition->Clone(&pLeftRange) != S_OK || pLeftRange == NULL)
+    {
+        return std::wstring();
+    }
+
+    std::wstring leftContext;
+    pLeftRange->Collapse(ec, TF_ANCHOR_START);
+
+    LONG shifted = 0;
+    if (pLeftRange->ShiftStart(ec, -kMaxZenzLeftContextChars, &shifted, NULL) == S_OK && shifted != 0)
+    {
+        WCHAR buffer[kMaxZenzLeftContextChars + 1] = {};
+        ULONG fetched = 0;
+        if (pLeftRange->GetText(ec, 0, buffer, kMaxZenzLeftContextChars, &fetched) == S_OK && fetched > 0)
+        {
+            leftContext.assign(buffer, buffer + fetched);
+        }
+    }
+
+    pLeftRange->Release();
+    return NormalizeLeftContextText(leftContext);
 }
 
 void CTextService::_RequestLiveConversionSourceViewUpdate(ITfContext* pContext, ITfRange* pRangeComposition)
@@ -1029,7 +1170,13 @@ void CTextService::_ReloadSettings()
         _HideLiveConversionSourceView();
     }
     _candidatePageSize = settings.candidatePageSize;
-    _kanaKanjiConverter = KanaKanjiConverter();
+    const std::wstring converterSettingsSignature = BuildConverterSettingsSignature(settings);
+    if (_converterSettingsSignature != converterSettingsSignature)
+    {
+        _kanaKanjiConverter = KanaKanjiConverter();
+        _kanaKanjiConverter.WarmUpZenzAsync();
+        _converterSettingsSignature = converterSettingsSignature;
+    }
     _romajiConverter.ReloadFromSettings();
 }
 
@@ -1406,22 +1553,26 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
     if (_CanUseLiveConversionPreview())
     {
         const std::wstring reading = _compositionState.GetReading();
-        _QueueLiveConversionRequest(reading);
+        const std::wstring leftContext = _GetLeftContextText(ec, pRangeComposition);
+        _QueueLiveConversionRequest(reading, leftContext);
 
         std::wstring completedReading;
+        std::wstring completedLeftContext;
         std::vector<ConversionCandidate> completedCandidates;
         {
             std::lock_guard<std::mutex> lock(_liveConversionMutex);
             if (_liveConversionCompletedVersion == _liveConversionLatestRequestedVersion &&
                 !reading.empty() &&
-                _liveConversionCompletedReading == reading)
+                _liveConversionCompletedReading == reading &&
+                _liveConversionCompletedLeftContext == leftContext)
             {
                 completedReading = _liveConversionCompletedReading;
+                completedLeftContext = _liveConversionCompletedLeftContext;
                 completedCandidates = _liveConversionCompletedCandidates;
             }
         }
 
-        if (!completedReading.empty())
+        if (!completedReading.empty() && completedLeftContext == leftContext)
         {
             _compositionState.ApplyLiveConversionPreview(completedReading, completedCandidates);
         }

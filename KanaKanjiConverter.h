@@ -19,6 +19,8 @@ public:
     {
         bool useZenz = true;
         bool zenzOnly = false;
+        std::wstring leftContext;
+        std::function<void(const std::wstring&)> onZenzPartial;
     };
 
     KanaKanjiConverter();
@@ -34,6 +36,7 @@ public:
         const std::function<bool()>& shouldCancel,
         const ConvertOptions& options) const;
     bool IsZenzEnabled() const;
+    void WarmUpZenzAsync() const;
 
 private:
     std::shared_ptr<LexiconRegistry> _lexicons;

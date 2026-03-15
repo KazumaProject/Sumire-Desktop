@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <cwctype>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -75,6 +77,21 @@ bool WriteWideString(HANDLE handle, const std::wstring& value)
     }
 
     return WriteAll(handle, value.data(), value.size() * sizeof(wchar_t));
+}
+
+bool WriteResponse(HANDLE pipe, ZenzProtocol::Status status, const std::wstring& value)
+{
+    ZenzProtocol::ResponseHeader response;
+    response.status = static_cast<std::uint32_t>(status);
+    response.resultChars = static_cast<std::uint32_t>(value.size());
+    return WriteAll(pipe, &response, sizeof(response)) && WriteWideString(pipe, value);
+}
+
+std::atomic_uint64_t g_latestGenerateRequestId = 0;
+
+bool IsLatestGenerateRequest(std::uint64_t requestId)
+{
+    return requestId == g_latestGenerateRequestId.load(std::memory_order_acquire);
 }
 
 std::wstring TrimWide(const std::wstring& value)
@@ -243,11 +260,23 @@ std::string HiraganaToKatakanaUtf8(const std::string& utf8)
     return out;
 }
 
-std::string BuildPrompt(const std::string& inputHiraUtf8)
+std::string BuildPrompt(const std::string& leftContextUtf8, const std::string& inputHiraUtf8)
 {
     const std::string inputTag = "\xEE\xB8\x80";
     const std::string outputTag = "\xEE\xB8\x81";
-    return PreprocessText(inputTag + HiraganaToKatakanaUtf8(inputHiraUtf8) + outputTag);
+    const std::string contextTag = "\xEE\xB8\x82";
+
+    std::string prompt;
+    if (!leftContextUtf8.empty())
+    {
+        prompt = contextTag + leftContextUtf8 + inputTag + HiraganaToKatakanaUtf8(inputHiraUtf8) + outputTag;
+    }
+    else
+    {
+        prompt = inputTag + HiraganaToKatakanaUtf8(inputHiraUtf8) + outputTag;
+    }
+
+    return PreprocessText(prompt);
 }
 
 std::vector<llama_token> Tokenize(const llama_model* model, const std::string& text, bool addSpecial)
@@ -401,17 +430,31 @@ struct ModelRuntime
         return true;
     }
 
-    std::wstring Generate(const std::wstring& modelPath, const std::wstring& reading)
+    std::wstring Generate(
+        const std::wstring& modelPath,
+        const std::wstring& leftContext,
+        const std::wstring& reading,
+        std::uint64_t requestId,
+        const std::function<bool(const std::wstring&)>& onPartial)
     {
+        if (!IsLatestGenerateRequest(requestId))
+        {
+            return L"";
+        }
+
         if (!EnsureLoaded(modelPath))
         {
             return L"";
         }
 
         std::lock_guard<std::mutex> lock(mutex);
+        if (!IsLatestGenerateRequest(requestId))
+        {
+            return L"";
+        }
         llama_kv_cache_clear(context);
 
-        const std::string prompt = BuildPrompt(WideToUtf8(reading));
+        const std::string prompt = BuildPrompt(WideToUtf8(leftContext), WideToUtf8(reading));
         std::vector<llama_token> promptTokens = Tokenize(model, prompt, true);
         if (promptTokens.empty())
         {
@@ -423,6 +466,10 @@ struct ModelRuntime
         {
             return L"";
         }
+        if (!IsLatestGenerateRequest(requestId))
+        {
+            return L"";
+        }
 
         const llama_token eos = llama_token_eos(model);
         const int32_t nVocab = llama_n_vocab(model);
@@ -431,6 +478,11 @@ struct ModelRuntime
         std::string generated;
         for (int step = 0; step < 24; ++step)
         {
+            if (!IsLatestGenerateRequest(requestId))
+            {
+                return L"";
+            }
+
             float* logits = llama_get_logits_ith(context, -1);
             if (logits == nullptr)
             {
@@ -461,6 +513,14 @@ struct ModelRuntime
             }
 
             generated += piece;
+            if (onPartial)
+            {
+                const std::wstring partial = TrimWide(Utf8ToWide(generated));
+                if (!partial.empty() && !onPartial(partial))
+                {
+                    return L"";
+                }
+            }
 
             std::vector<llama_token> stepTokens(1, token);
             if (!DecodeTokens(context, stepTokens, &nPast))
@@ -488,9 +548,11 @@ bool HandleClient(HANDLE pipe)
     }
 
     std::wstring reading;
+    std::wstring leftContext;
     std::wstring modelPath;
     std::wstring modelRepo;
     if (!ReadWideString(pipe, request.readingChars, &reading) ||
+        !ReadWideString(pipe, request.leftContextChars, &leftContext) ||
         !ReadWideString(pipe, request.modelPathChars, &modelPath) ||
         !ReadWideString(pipe, request.modelRepoChars, &modelRepo))
     {
@@ -499,13 +561,25 @@ bool HandleClient(HANDLE pipe)
 
     UNREFERENCED_PARAMETER(modelRepo);
 
-    const std::wstring generated = GetRuntime().Generate(TrimWide(modelPath), reading);
+    if (request.command == static_cast<std::uint32_t>(ZenzProtocol::Command::WarmUp))
+    {
+        return WriteResponse(
+            pipe,
+            GetRuntime().EnsureLoaded(TrimWide(modelPath)) ? ZenzProtocol::Status::Ok : ZenzProtocol::Status::Error,
+            std::wstring());
+    }
 
-    ZenzProtocol::ResponseHeader response;
-    response.status = static_cast<std::uint32_t>(
-        generated.empty() ? ZenzProtocol::Status::Error : ZenzProtocol::Status::Ok);
-    response.resultChars = static_cast<std::uint32_t>(generated.size());
-    return WriteAll(pipe, &response, sizeof(response)) && WriteWideString(pipe, generated);
+    const std::uint64_t requestId = g_latestGenerateRequestId.fetch_add(1, std::memory_order_acq_rel) + 1;
+    const std::wstring generated = GetRuntime().Generate(
+        TrimWide(modelPath),
+        leftContext,
+        reading,
+        requestId,
+        std::function<bool(const std::wstring&)>());
+    return WriteResponse(
+        pipe,
+        generated.empty() ? ZenzProtocol::Status::Error : ZenzProtocol::Status::Ok,
+        generated);
 }
 }
 
@@ -517,7 +591,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
             ZenzProtocol::kPipeName,
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-            1,
+            PIPE_UNLIMITED_INSTANCES,
             32768,
             32768,
             0,
@@ -530,11 +604,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         const BOOL connected = ConnectNamedPipe(pipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
         if (connected)
         {
-            HandleClient(pipe);
+            std::thread([pipe]()
+            {
+                HandleClient(pipe);
+                FlushFileBuffers(pipe);
+                DisconnectNamedPipe(pipe);
+                CloseHandle(pipe);
+            }).detach();
+            continue;
         }
 
-        FlushFileBuffers(pipe);
-        DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
     }
 }

@@ -368,7 +368,18 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
         return _ShowCandidateList(ec, pContext);
     }
 
-    if (!_compositionState.StartConversion(_kanaKanjiConverter, _GetCompositionInputMode(), _romajiConverter))
+    std::wstring leftContext;
+    if (_pComposition != NULL)
+    {
+        ITfRange* pRangeComposition = NULL;
+        if (_pComposition->GetRange(&pRangeComposition) == S_OK && pRangeComposition != NULL)
+        {
+            leftContext = _GetLeftContextText(ec, pRangeComposition);
+            pRangeComposition->Release();
+        }
+    }
+
+    if (!_compositionState.StartConversion(_kanaKanjiConverter, _GetCompositionInputMode(), _romajiConverter, leftContext))
     {
         return S_OK;
     }
