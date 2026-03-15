@@ -729,7 +729,8 @@ BOOL CTextService::_InitLiveConversionAsync()
             }
 
             KanaKanjiConverter::ConvertOptions convertOptions;
-            convertOptions.useZenz = false;
+            convertOptions.useZenz = _kanaKanjiConverter.IsZenzEnabled();
+            convertOptions.zenzOnly = convertOptions.useZenz;
             ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
             {
                 std::lock_guard<std::mutex> lock(_liveConversionMutex);

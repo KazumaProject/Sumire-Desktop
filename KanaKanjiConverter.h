@@ -18,6 +18,7 @@ public:
     struct ConvertOptions
     {
         bool useZenz = true;
+        bool zenzOnly = false;
     };
 
     KanaKanjiConverter();
@@ -32,6 +33,7 @@ public:
         const std::wstring& reading,
         const std::function<bool()>& shouldCancel,
         const ConvertOptions& options) const;
+    bool IsZenzEnabled() const;
 
 private:
     std::shared_ptr<LexiconRegistry> _lexicons;

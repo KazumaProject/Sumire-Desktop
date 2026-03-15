@@ -482,6 +482,20 @@ ConversionCandidate BuildSyntheticZenzCandidate(
     return candidate;
 }
 
+ConversionResult BuildZenzOnlyResult(
+    const std::wstring& reading,
+    const std::wstring& generated)
+{
+    ConversionResult result;
+    if (generated.empty())
+    {
+        return result;
+    }
+
+    result.candidates.push_back(BuildSyntheticZenzCandidate(reading, generated, result));
+    return result;
+}
+
 void FuseZenzCandidate(
     const std::wstring& reading,
     const std::wstring& generated,
@@ -665,6 +679,18 @@ ConversionResult KanaKanjiConverter::Convert(
     if (reading.empty())
     {
         return result;
+    }
+
+    const bool zenzEnabled = options.useZenz && _zenzClient != nullptr && _zenzClient->IsEnabled();
+    if (options.zenzOnly)
+    {
+        if (!zenzEnabled)
+        {
+            return result;
+        }
+
+        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 800u : 1200u;
+        return BuildZenzOnlyResult(reading, _zenzClient->Generate(reading, timeoutMs, shouldCancel));
     }
 
     const int kInf = std::numeric_limits<int>::max() / 8;
@@ -859,7 +885,7 @@ ConversionResult KanaKanjiConverter::Convert(
         return result;
     }
 
-    if (options.useZenz && _zenzClient != nullptr && _zenzClient->IsEnabled())
+    if (zenzEnabled)
     {
         const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
         const std::wstring generated = _zenzClient->Generate(reading, timeoutMs, shouldCancel);
@@ -883,4 +909,9 @@ ConversionResult KanaKanjiConverter::Convert(
     }
 
     return result;
+}
+
+bool KanaKanjiConverter::IsZenzEnabled() const
+{
+    return _zenzClient != nullptr && _zenzClient->IsEnabled();
 }

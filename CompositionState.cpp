@@ -447,7 +447,8 @@ void CompositionState::RefreshLiveConversionPreview(
     }
 
     KanaKanjiConverter::ConvertOptions convertOptions;
-    convertOptions.useZenz = false;
+    convertOptions.useZenz = kanaKanjiConverter.IsZenzEnabled();
+    convertOptions.zenzOnly = convertOptions.useZenz;
     const ConversionResult result = kanaKanjiConverter.Convert(_reading, convertOptions);
     _liveConversionCandidates = result.candidates;
     _liveConversionReadingCache = _reading;
