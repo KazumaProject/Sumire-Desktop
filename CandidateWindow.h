@@ -27,8 +27,6 @@
 class CCandidateWindow : public ITfCandidateListUIElementBehavior
 {
 public:
-    static constexpr UINT kCandidatePageSize = 9;
-
     CCandidateWindow(CTextService *pTextService);
     ~CCandidateWindow();
 
@@ -83,6 +81,7 @@ private:
     void _Prev();
     void _NextPage();
     void _PrevPage();
+    UINT _GetPageSize() const;
 
     static LRESULT CALLBACK _WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 

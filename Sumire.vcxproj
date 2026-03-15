@@ -186,6 +186,7 @@
     <ClCompile Include="RomajiKanaConverter.cpp" />
     <ClCompile Include="Server.cpp" />
     <ClCompile Include="StartComposition.cpp" />
+    <ClCompile Include="SumireSettingsStore.cpp" />
     <ClCompile Include="TextEditSink.cpp" />
     <ClCompile Include="TextService.cpp" />
     <ClCompile Include="ThreadMgrEventSink.cpp" />
@@ -213,6 +214,7 @@
     <ClInclude Include="PersonNameLexicon.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="RomajiKanaConverter.h" />
+    <ClInclude Include="SumireSettingsStore.h" />
     <ClInclude Include="TextService.h" />
   </ItemGroup>
   <ItemGroup>

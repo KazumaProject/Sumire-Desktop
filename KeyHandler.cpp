@@ -164,6 +164,11 @@ static bool TryTranslateVirtualKeyToChar(WPARAM wParam, LPARAM lParam, WCHAR* ch
     return false;
 }
 
+static bool IsShiftKeyDown()
+{
+    return (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+}
+
 
 //+---------------------------------------------------------------------------
 //
@@ -307,6 +312,7 @@ HRESULT CTextService::_HandleReturnKey(TfEditCookie ec, ITfContext* pContext)
 HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 {
     _pendingAlphabeticShift = FALSE;
+    const bool shiftDown = IsShiftKeyDown();
     CompositionPhase phase = _compositionState.GetPhase();
     if (phase == CompositionPhase::Idle)
     {
@@ -315,6 +321,11 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
 
     if (phase == CompositionPhase::CandidateSelecting)
     {
+        if (!shiftDown)
+        {
+            return _SelectNextCandidate(ec, pContext);
+        }
+
         if (!_compositionState.BeginRechunkSelection(_romajiConverter))
         {
             return S_OK;
@@ -342,6 +353,11 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
             return S_OK;
         }
 
+        if (shiftDown)
+        {
+            _compositionState.BeginRechunkSelection(_romajiConverter);
+        }
+
         _compositionPhase = _compositionState.GetPhase();
         HRESULT hr = _UpdateCompositionText(ec, pContext);
         if (FAILED(hr))
@@ -363,6 +379,11 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
         {
             _compositionPhase = _compositionState.GetPhase();
             return _UpdateCompositionText(ec, pContext);
+        }
+
+        if (shiftDown)
+        {
+            _compositionState.BeginRechunkSelection(_romajiConverter);
         }
 
         _compositionPhase = _compositionState.GetPhase();

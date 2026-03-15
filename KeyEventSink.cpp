@@ -204,6 +204,7 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lPara
 STDAPI CTextService::OnSetFocus(BOOL fForeground)
 {
     UNREFERENCED_PARAMETER(fForeground);
+    _ReloadSettings();
     return S_OK;
 }
 

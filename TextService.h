@@ -15,6 +15,7 @@
 #define TEXTSERVICE_H
 
 #include <cstdint>
+#include <chrono>
 #include <condition_variable>
 #include <msctf.h>
 #include <mutex>
@@ -146,6 +147,7 @@ public:
     InputMode GetEffectiveInputMode() const;
     void SetLiveConversionEnabled(BOOL enabled);
     BOOL IsLiveConversionEnabled() const;
+    int GetCandidatePageSize() const;
     BOOL HasInputScopeOverride() const;
     void SetInputScopeOverride(InputMode mode);
     void ClearInputScopeOverride();
@@ -182,6 +184,7 @@ private:
     void _QueueLiveConversionRequest(const std::wstring& reading);
     void _CancelLiveConversionRequests();
     bool _CanUseLiveConversionPreview() const;
+    void _ReloadSettings();
 
     // initialize and uninitialize ThreadMgrEventSink.
     BOOL _InitThreadMgrEventSink();
@@ -254,6 +257,7 @@ private:
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
+    int _candidatePageSize;
     BOOL _pendingAlphabeticShift;
     HWND _liveConversionWindow;
     std::thread _liveConversionWorker;
@@ -263,6 +267,7 @@ private:
     bool _liveConversionHasPendingRequest;
     std::wstring _liveConversionPendingReading;
     std::wstring _liveConversionLatestRequestedReading;
+    std::chrono::steady_clock::time_point _liveConversionLatestRequestedAt;
     std::wstring _liveConversionCompletedReading;
     std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
     std::uint64_t _liveConversionLatestRequestedVersion;

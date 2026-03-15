@@ -94,6 +94,11 @@ std::vector<std::wstring> BuildAlternatives(
     return alternatives;
 }
 
+bool ShouldCancel(const std::function<bool()>& shouldCancel)
+{
+    return static_cast<bool>(shouldCancel) && shouldCancel();
+}
+
 bool LoadConnectionMatrix(
     const std::filesystem::path& path,
     std::vector<std::int16_t>* values,
@@ -504,6 +509,37 @@ ConversionCandidate BuildConversionCandidateFromTerminal(
     return candidate;
 }
 
+ConversionCandidate BuildConversionCandidateFromTerminal(
+    const LexiconRegistry& lexicons,
+    const std::wstring& reading,
+    const std::vector<std::vector<PathStep>>& lattice,
+    size_t end,
+    int nodeIndex,
+    int rank,
+    int totalCost,
+    const std::function<bool()>& shouldCancel)
+{
+    if (ShouldCancel(shouldCancel))
+    {
+        return ConversionCandidate();
+    }
+
+    ConversionCandidate candidate = BuildConversionCandidateFromTerminal(
+        lexicons,
+        reading,
+        lattice,
+        end,
+        nodeIndex,
+        rank,
+        totalCost);
+    if (ShouldCancel(shouldCancel))
+    {
+        return ConversionCandidate();
+    }
+
+    return candidate;
+}
+
 std::wstring BuildCandidateSignature(const ConversionCandidate& candidate)
 {
     std::wstring signature;
@@ -554,6 +590,13 @@ void KanaKanjiConverter::AddLexicon(const std::shared_ptr<ILexicon>& lexicon)
 
 ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
 {
+    return Convert(reading, std::function<bool()>());
+}
+
+ConversionResult KanaKanjiConverter::Convert(
+    const std::wstring& reading,
+    const std::function<bool()>& shouldCancel) const
+{
     ConversionResult result;
     if (reading.empty())
     {
@@ -568,6 +611,11 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
 
     for (size_t start = 0; start < length; ++start)
     {
+        if (ShouldCancel(shouldCancel))
+        {
+            return ConversionResult();
+        }
+
         entries.clear();
         _lexicons->LookupPrefix(reading, start, &entries);
         if (entries.empty())
@@ -593,9 +641,19 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
 
     for (size_t end = 1; end <= length; ++end)
     {
+        if (ShouldCancel(shouldCancel))
+        {
+            return ConversionResult();
+        }
+
         std::vector<PathStep>& nodes = lattice[end];
         for (size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex)
         {
+            if (ShouldCancel(shouldCancel))
+            {
+                return ConversionResult();
+            }
+
             PathStep& node = nodes[nodeIndex];
             const int wordCost = GetAdjustedWordCost(node.entry);
             std::vector<PathStep::Hypothesis> hypotheses;
@@ -651,6 +709,11 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
     std::vector<TerminalHypothesis> terminals;
     for (size_t nodeIndex = 0; nodeIndex < lattice[length].size(); ++nodeIndex)
     {
+        if (ShouldCancel(shouldCancel))
+        {
+            return ConversionResult();
+        }
+
         const PathStep& node = lattice[length][nodeIndex];
         for (size_t rank = 0; rank < node.hypotheses.size(); ++rank)
         {
@@ -686,6 +749,11 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
     std::vector<std::wstring> signatures;
     for (const TerminalHypothesis& terminal : terminals)
     {
+        if (ShouldCancel(shouldCancel))
+        {
+            return ConversionResult();
+        }
+
         ConversionCandidate candidate = BuildConversionCandidateFromTerminal(
             *_lexicons,
             reading,
@@ -693,7 +761,12 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
             length,
             terminal.nodeIndex,
             terminal.rank,
-            terminal.totalCost);
+            terminal.totalCost,
+            shouldCancel);
+        if (candidate.surface.empty() && candidate.bunsetsu.empty())
+        {
+            return ConversionResult();
+        }
         const std::wstring signature = BuildCandidateSignature(candidate);
         bool duplicate = false;
         for (const std::wstring& existing : signatures)
@@ -725,6 +798,11 @@ ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
     const ConversionCandidate& bestCandidate = result.candidates[0];
     for (size_t index = 0; index < bestCandidate.bunsetsu.size(); ++index)
     {
+        if (ShouldCancel(shouldCancel))
+        {
+            return ConversionResult();
+        }
+
         const BunsetsuConversion& bunsetsu = bestCandidate.bunsetsu[index];
         const int boundary = bunsetsu.start + bunsetsu.length;
         if (index + 1 < bestCandidate.bunsetsu.size())

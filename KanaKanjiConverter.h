@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,9 @@ public:
 
     void AddLexicon(const std::shared_ptr<ILexicon>& lexicon);
     ConversionResult Convert(const std::wstring& reading) const;
+    ConversionResult Convert(
+        const std::wstring& reading,
+        const std::function<bool()>& shouldCancel) const;
 
 private:
     std::shared_ptr<LexiconRegistry> _lexicons;

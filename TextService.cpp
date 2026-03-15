@@ -16,6 +16,7 @@
 #include "CandidateList.h"
 #include "EditSession.h"
 #include "LanguageBar.h"
+#include "SumireSettingsStore.h"
 
 extern const GUID GUID_LBI_INPUTMODE;
 
@@ -23,6 +24,7 @@ namespace
 {
 constexpr UINT WM_SUMIRE_LIVE_CONVERSION_READY = WM_APP + 0x120;
 const wchar_t kLiveConversionWindowClassName[] = L"SumireLiveConversionWindow";
+constexpr auto kLiveConversionDebounce = std::chrono::milliseconds(45);
 
 LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -165,6 +167,7 @@ CTextService::CTextService()
     //
     _compositionPhase = CompositionPhase::Idle;
     _liveConversionEnabled = TRUE;
+    _candidatePageSize = 9;
     _pendingAlphabeticShift = FALSE;
     _liveConversionWindow = NULL;
     _liveConversionWorkerRunning = false;
@@ -172,6 +175,7 @@ CTextService::CTextService()
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
 
     _tfClientId = TF_CLIENTID_NULL;
 
@@ -214,6 +218,7 @@ CTextService::~CTextService()
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
@@ -333,6 +338,7 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     _pThreadMgr = pThreadMgr;
     _pThreadMgr->AddRef();
     _tfClientId = tfClientId;
+    _ReloadSettings();
 
     //
     // Initialize ThreadMgrEventSink.
@@ -537,6 +543,11 @@ BOOL CTextService::IsLiveConversionEnabled() const
     return _liveConversionEnabled;
 }
 
+int CTextService::GetCandidatePageSize() const
+{
+    return _candidatePageSize;
+}
+
 InputMode CTextService::_GetCompositionInputMode() const
 {
     if (_compositionState.IsAlphabeticPreeditActive())
@@ -582,6 +593,7 @@ BOOL CTextService::_InitLiveConversionAsync()
         {
             std::wstring reading;
             std::uint64_t version = 0;
+            std::chrono::steady_clock::time_point requestedAt;
             {
                 std::unique_lock<std::mutex> lock(_liveConversionMutex);
                 _liveConversionCv.wait(lock, [this]()
@@ -594,12 +606,34 @@ BOOL CTextService::_InitLiveConversionAsync()
                     break;
                 }
 
-                reading = _liveConversionPendingReading;
                 version = _liveConversionLatestRequestedVersion;
+                requestedAt = _liveConversionLatestRequestedAt;
+                _liveConversionCv.wait_until(lock, requestedAt + kLiveConversionDebounce, [this, version]()
+                {
+                    return !_liveConversionWorkerRunning ||
+                        _liveConversionLatestRequestedVersion != version;
+                });
+
+                if (!_liveConversionWorkerRunning)
+                {
+                    break;
+                }
+
+                if (_liveConversionLatestRequestedVersion != version)
+                {
+                    continue;
+                }
+
+                reading = _liveConversionPendingReading;
                 _liveConversionHasPendingRequest = false;
             }
 
-            ConversionResult result = _kanaKanjiConverter.Convert(reading);
+            ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
+            {
+                std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                return !_liveConversionWorkerRunning ||
+                    version != _liveConversionLatestRequestedVersion;
+            });
 
             bool shouldNotify = false;
             {
@@ -664,7 +698,8 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
         return;
     }
 
-    if (reading == _liveConversionLatestRequestedReading)
+    if (reading == _liveConversionLatestRequestedReading &&
+        (_liveConversionHasPendingRequest || _liveConversionCompletedReading == reading))
     {
         return;
     }
@@ -672,6 +707,7 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
     ++_liveConversionLatestRequestedVersion;
     _liveConversionLatestRequestedReading = reading;
     _liveConversionPendingReading = reading;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::now();
     _liveConversionHasPendingRequest = true;
     _liveConversionCv.notify_one();
 }
@@ -683,6 +719,7 @@ void CTextService::_CancelLiveConversionRequests()
     _liveConversionLatestRequestedReading.clear();
     _liveConversionPendingReading.clear();
     _liveConversionHasPendingRequest = false;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _liveConversionCompletedReading.clear();
     _liveConversionCompletedCandidates.clear();
     _liveConversionCompletedVersion = 0;
@@ -695,6 +732,14 @@ bool CTextService::_CanUseLiveConversionPreview() const
         !_compositionState.Empty() &&
         !_compositionState.IsAlphabeticPreeditActive() &&
         GetEffectiveInputMode() == InputMode::Hiragana;
+}
+
+void CTextService::_ReloadSettings()
+{
+    const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    _liveConversionEnabled = settings.liveConversionEnabled ? TRUE : FALSE;
+    _candidatePageSize = settings.candidatePageSize;
+    _romajiConverter.ReloadFromSettings();
 }
 
 void CTextService::_ApplyCompletedLiveConversionPreview()
@@ -1089,7 +1134,7 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         {
             _compositionState.ApplyLiveConversionPreview(completedReading, completedCandidates);
         }
-        else if (!_compositionState.HasLiveConversionPreviewForCurrentReading())
+        else
         {
             _compositionState.ClearLiveConversionPreviewState();
         }
@@ -1225,7 +1270,7 @@ HRESULT CTextService::_SelectPrevCandidate(TfEditCookie ec, ITfContext* pContext
 
 HRESULT CTextService::_SelectNextCandidatePage(TfEditCookie ec, ITfContext* pContext)
 {
-    if (!_compositionState.SelectCandidatePage(1, 9))
+    if (!_compositionState.SelectCandidatePage(1, _candidatePageSize))
     {
         return S_FALSE;
     }
@@ -1236,7 +1281,7 @@ HRESULT CTextService::_SelectNextCandidatePage(TfEditCookie ec, ITfContext* pCon
 
 HRESULT CTextService::_SelectPrevCandidatePage(TfEditCookie ec, ITfContext* pContext)
 {
-    if (!_compositionState.SelectCandidatePage(-1, 9))
+    if (!_compositionState.SelectCandidatePage(-1, _candidatePageSize))
     {
         return S_FALSE;
     }
