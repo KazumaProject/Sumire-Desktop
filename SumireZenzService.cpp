@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <urlmon.h>
 
 #include <algorithm>
 #include <atomic>
@@ -111,6 +112,40 @@ std::wstring TrimWide(const std::wstring& value)
     return value.substr(start, end - start);
 }
 
+bool StartsWithInsensitive(const std::wstring& value, const std::wstring& prefix)
+{
+    return value.size() >= prefix.size() &&
+        CompareStringOrdinal(
+            value.c_str(),
+            static_cast<int>(prefix.size()),
+            prefix.c_str(),
+            static_cast<int>(prefix.size()),
+            TRUE) == CSTR_EQUAL;
+}
+
+bool ContainsInsensitive(const std::wstring& value, const std::wstring& fragment)
+{
+    if (fragment.empty() || value.size() < fragment.size())
+    {
+        return false;
+    }
+
+    for (size_t index = 0; index + fragment.size() <= value.size(); ++index)
+    {
+        if (CompareStringOrdinal(
+                value.c_str() + index,
+                static_cast<int>(fragment.size()),
+                fragment.c_str(),
+                static_cast<int>(fragment.size()),
+                TRUE) == CSTR_EQUAL)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::string WideToUtf8(const std::wstring& value)
 {
     if (value.empty())
@@ -145,6 +180,168 @@ std::wstring Utf8ToWide(const std::string& value)
     std::wstring wide(static_cast<size_t>(size), L'\0');
     MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), static_cast<int>(value.size()), wide.data(), size);
     return wide;
+}
+
+std::wstring Utf8ToWideLossy(const std::string& value)
+{
+    if (value.empty())
+    {
+        return std::wstring();
+    }
+
+    const int size = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0)
+    {
+        return std::wstring();
+    }
+
+    std::wstring wide(static_cast<size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), wide.data(), size);
+    return wide;
+}
+
+std::wstring UrlEncodePathComponent(const std::wstring& value)
+{
+    static constexpr char kHex[] = "0123456789ABCDEF";
+
+    const std::string utf8 = WideToUtf8(value);
+    std::string encoded;
+    encoded.reserve(utf8.size() * 3);
+    for (unsigned char byte : utf8)
+    {
+        if ((byte >= 'A' && byte <= 'Z') ||
+            (byte >= 'a' && byte <= 'z') ||
+            (byte >= '0' && byte <= '9') ||
+            byte == '-' ||
+            byte == '_' ||
+            byte == '.' ||
+            byte == '~')
+        {
+            encoded.push_back(static_cast<char>(byte));
+        }
+        else
+        {
+            encoded.push_back('%');
+            encoded.push_back(kHex[(byte >> 4) & 0x0F]);
+            encoded.push_back(kHex[byte & 0x0F]);
+        }
+    }
+
+    return Utf8ToWideLossy(encoded);
+}
+
+void ReplaceFirstInsensitive(std::wstring* value, const std::wstring& from, const std::wstring& to)
+{
+    if (value == nullptr || from.empty() || value->size() < from.size())
+    {
+        return;
+    }
+
+    for (size_t index = 0; index + from.size() <= value->size(); ++index)
+    {
+        if (CompareStringOrdinal(
+                value->c_str() + index,
+                static_cast<int>(from.size()),
+                from.c_str(),
+                static_cast<int>(from.size()),
+                TRUE) == CSTR_EQUAL)
+        {
+            value->replace(index, from.size(), to);
+            return;
+        }
+    }
+}
+
+std::wstring ResolveModelDownloadUrl(const std::wstring& modelPath, const std::wstring& modelRepo)
+{
+    std::wstring url = TrimWide(modelRepo);
+    if (url.empty())
+    {
+        return L"";
+    }
+
+    const std::wstring fileName = std::filesystem::path(modelPath).filename().wstring();
+    if (fileName.empty())
+    {
+        return L"";
+    }
+
+    while (!url.empty() && url.back() == L'/')
+    {
+        url.pop_back();
+    }
+
+    ReplaceFirstInsensitive(&url, L"/blob/", L"/resolve/");
+    ReplaceFirstInsensitive(&url, L"/tree/", L"/resolve/");
+
+    if (ContainsInsensitive(url, L".gguf"))
+    {
+        return url;
+    }
+
+    if (ContainsInsensitive(url, L"/resolve/"))
+    {
+        return url + L"/" + UrlEncodePathComponent(fileName) + L"?download=true";
+    }
+
+    if (StartsWithInsensitive(url, L"http://") || StartsWithInsensitive(url, L"https://"))
+    {
+        return url + L"/resolve/main/" + UrlEncodePathComponent(fileName) + L"?download=true";
+    }
+
+    return L"";
+}
+
+bool DownloadFileToPath(const std::wstring& url, const std::filesystem::path& destination)
+{
+    if (url.empty() || destination.empty())
+    {
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(destination.parent_path(), ec);
+    if (ec)
+    {
+        return false;
+    }
+
+    const std::filesystem::path tempPath = destination.wstring() + L".download";
+    std::filesystem::remove(tempPath, ec);
+    ec.clear();
+
+    const HRESULT hr = URLDownloadToFileW(nullptr, url.c_str(), tempPath.c_str(), 0, nullptr);
+    if (FAILED(hr))
+    {
+        std::filesystem::remove(tempPath, ec);
+        return false;
+    }
+
+    if (!MoveFileExW(tempPath.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        std::filesystem::remove(tempPath, ec);
+        return false;
+    }
+
+    return std::filesystem::exists(destination, ec) && !ec;
+}
+
+bool EnsureModelFileExists(const std::wstring& modelPath, const std::wstring& modelRepo)
+{
+    std::error_code ec;
+    const std::filesystem::path path(modelPath);
+    if (std::filesystem::exists(path, ec) && !ec)
+    {
+        return true;
+    }
+
+    const std::wstring downloadUrl = ResolveModelDownloadUrl(modelPath, modelRepo);
+    if (downloadUrl.empty())
+    {
+        return false;
+    }
+
+    return DownloadFileToPath(downloadUrl, path);
 }
 
 std::string PreprocessText(std::string text)
@@ -383,7 +580,7 @@ struct ModelRuntime
         currentModelPath.clear();
     }
 
-    bool EnsureLoaded(const std::wstring& modelPath)
+    bool EnsureLoaded(const std::wstring& modelPath, const std::wstring&)
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (model != nullptr && context != nullptr && currentModelPath == modelPath)
@@ -432,6 +629,7 @@ struct ModelRuntime
 
     std::wstring Generate(
         const std::wstring& modelPath,
+        const std::wstring& modelRepo,
         const std::wstring& leftContext,
         const std::wstring& reading,
         std::uint64_t requestId,
@@ -442,7 +640,7 @@ struct ModelRuntime
             return L"";
         }
 
-        if (!EnsureLoaded(modelPath))
+        if (!EnsureLoaded(modelPath, modelRepo))
         {
             return L"";
         }
@@ -559,19 +757,21 @@ bool HandleClient(HANDLE pipe)
         return false;
     }
 
-    UNREFERENCED_PARAMETER(modelRepo);
+    const std::wstring trimmedModelPath = TrimWide(modelPath);
+    const std::wstring trimmedModelRepo = TrimWide(modelRepo);
 
     if (request.command == static_cast<std::uint32_t>(ZenzProtocol::Command::WarmUp))
     {
         return WriteResponse(
             pipe,
-            GetRuntime().EnsureLoaded(TrimWide(modelPath)) ? ZenzProtocol::Status::Ok : ZenzProtocol::Status::Error,
+            GetRuntime().EnsureLoaded(trimmedModelPath, trimmedModelRepo) ? ZenzProtocol::Status::Ok : ZenzProtocol::Status::Error,
             std::wstring());
     }
 
     const std::uint64_t requestId = g_latestGenerateRequestId.fetch_add(1, std::memory_order_acq_rel) + 1;
     const std::wstring generated = GetRuntime().Generate(
-        TrimWide(modelPath),
+        trimmedModelPath,
+        trimmedModelRepo,
         leftContext,
         reading,
         requestId,

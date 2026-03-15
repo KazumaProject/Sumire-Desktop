@@ -23,6 +23,8 @@ x64/
 x86/
 [Bb]uild/
 ipch/
+artifacts/
+dist/
 
 # コンパイル済みバイナリ・中間ファイル
 *.obj

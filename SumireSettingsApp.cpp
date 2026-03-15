@@ -542,7 +542,7 @@ void UpdateZenzModelWarning(HWND hwnd)
 
     SetWindowTextW(
         state->zenzWarning,
-        L"Warning: GGUF model not found. Install it to the path above or choose another file.");
+        L"Warning: GGUF model not found. Download it during install or place it at the path above.");
 }
 
 void UpdateZenzServiceStatus(HWND hwnd)

@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <urlmon.h>
 
 #include <filesystem>
 #include <initializer_list>
@@ -29,11 +30,12 @@ enum ControlId
     IdInstallPathEdit = 104,
     IdBrowse = 105,
     IdShortcutCheck = 106,
-    IdLaunchSettingsCheck = 107,
-    IdBack = 108,
-    IdNext = 109,
-    IdCancel = 110,
-    IdStatus = 111,
+    IdDownloadModelCheck = 107,
+    IdLaunchSettingsCheck = 108,
+    IdBack = 109,
+    IdNext = 110,
+    IdCancel = 111,
+    IdStatus = 112,
 };
 
 struct WizardState
@@ -41,6 +43,7 @@ struct WizardState
     WizardPage page = WizardPage::Welcome;
     bool installSucceeded = false;
     bool createShortcuts = true;
+    bool downloadModelDuringInstall = true;
     bool launchSettingsAfterFinish = false;
     bool installStarted = false;
     std::wstring installDirectory;
@@ -52,12 +55,16 @@ struct WizardState
     HWND installPathEdit = nullptr;
     HWND browseButton = nullptr;
     HWND shortcutCheck = nullptr;
+    HWND downloadModelCheck = nullptr;
     HWND launchSettingsCheck = nullptr;
     HWND backButton = nullptr;
     HWND nextButton = nullptr;
     HWND cancelButton = nullptr;
     HWND status = nullptr;
 };
+
+constexpr wchar_t kDefaultZenzModelRepo[] = L"https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf";
+constexpr wchar_t kDefaultZenzModelRelativePath[] = L"models\\zenz-v3.1-small-gguf\\ggml-model-Q5_K_M.gguf";
 
 HMENU ControlMenu(int id)
 {
@@ -203,6 +210,58 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
     return true;
 }
 
+std::wstring BuildDefaultZenzModelDownloadUrl()
+{
+    return std::wstring(kDefaultZenzModelRepo) + L"/resolve/main/ggml-model-Q5_K_M.gguf?download=true";
+}
+
+bool DownloadDefaultZenzModel(const std::filesystem::path& installDirectory, std::wstring* error)
+{
+    const std::filesystem::path modelPath = installDirectory / kDefaultZenzModelRelativePath;
+    std::error_code ec;
+    if (std::filesystem::exists(modelPath, ec) && !ec)
+    {
+        return true;
+    }
+
+    if (!SumireInstallUtil::EnsureDirectory(modelPath.parent_path()))
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to create the model directory.";
+        }
+        return false;
+    }
+
+    const std::filesystem::path temporaryPath = modelPath.wstring() + L".download";
+    std::filesystem::remove(temporaryPath, ec);
+    ec.clear();
+
+    const std::wstring downloadUrl = BuildDefaultZenzModelDownloadUrl();
+    const HRESULT hr = URLDownloadToFileW(nullptr, downloadUrl.c_str(), temporaryPath.c_str(), 0, nullptr);
+    if (FAILED(hr))
+    {
+        std::filesystem::remove(temporaryPath, ec);
+        if (error != nullptr)
+        {
+            *error = L"Failed to download the default zenz model.";
+        }
+        return false;
+    }
+
+    if (!MoveFileExW(temporaryPath.c_str(), modelPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        std::filesystem::remove(temporaryPath, ec);
+        if (error != nullptr)
+        {
+            *error = L"Failed to place the downloaded zenz model.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
 std::wstring BrowseForFolder(HWND owner, const std::wstring& currentPath)
 {
     BROWSEINFOW browseInfo = {};
@@ -246,6 +305,7 @@ void UpdateWizardPage(HWND hwnd)
     SetVisible(state->installPathEdit, showOptions);
     SetVisible(state->browseButton, showOptions);
     SetVisible(state->shortcutCheck, showOptions);
+    SetVisible(state->downloadModelCheck, showOptions);
     SetVisible(state->launchSettingsCheck, showLaunchSettings);
 
     switch (state->page)
@@ -323,6 +383,7 @@ void RunInstall(HWND hwnd)
     GetWindowTextW(state->installPathEdit, installPath, ARRAYSIZE(installPath));
     state->installDirectory = installPath;
     state->createShortcuts = IsChecked(state->shortcutCheck);
+    state->downloadModelDuringInstall = IsChecked(state->downloadModelCheck);
 
     const std::filesystem::path sourceDirectory = SumireInstallUtil::GetExecutableDirectory();
     const std::filesystem::path installDirectory = std::filesystem::path(state->installDirectory);
@@ -341,6 +402,13 @@ void RunInstall(HWND hwnd)
 
     std::wstring error;
     bool success = CopyPayload(sourceDirectory, installDirectory, &error);
+
+    if (success && state->downloadModelDuringInstall)
+    {
+        SetWindowTextW(state->status, L"Downloading default zenz model...");
+        UpdateWindow(hwnd);
+        success = DownloadDefaultZenzModel(installDirectory, &error);
+    }
 
     const std::filesystem::path installedDll = FindFirstExistingFile(installDirectory, {L"Sumite-Desktop.dll", L"TextService.dll"});
     const std::filesystem::path installedSettings = installDirectory / L"SumireSettings.exe";
@@ -490,12 +558,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 nullptr);
             SetChecked(state->shortcutCheck, true);
 
+            state->downloadModelCheck = CreateWindowW(
+                L"BUTTON",
+                L"Download default zenz model during install",
+                WS_CHILD | BS_AUTOCHECKBOX,
+                16,
+                216,
+                320,
+                24,
+                hwnd,
+                ControlMenu(IdDownloadModelCheck),
+                nullptr,
+                nullptr);
+            SetChecked(state->downloadModelCheck, true);
+
             state->status = CreateWindowW(
                 L"STATIC",
                 L"",
                 WS_CHILD | WS_VISIBLE,
                 16,
-                224,
+                248,
                 460,
                 36,
                 hwnd,
@@ -508,7 +590,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"完了後に設定画面を開く",
                 WS_CHILD | BS_AUTOCHECKBOX,
                 16,
-                224,
+                248,
                 200,
                 24,
                 hwnd,
@@ -521,7 +603,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"< 戻る",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 214,
-                270,
+                300,
                 80,
                 28,
                 hwnd,
@@ -534,7 +616,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                 304,
-                270,
+                300,
                 80,
                 28,
                 hwnd,
@@ -547,7 +629,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"キャンセル",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 394,
-                270,
+                300,
                 80,
                 28,
                 hwnd,
@@ -654,7 +736,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         500,
-        350,
+        380,
         nullptr,
         nullptr,
         instance,
