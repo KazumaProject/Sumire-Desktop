@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build x64 Release
+        run: msbuild Sumire.sln /m /p:Configuration=Release /p:Platform=x64
+        shell: pwsh
+
+      - name: Package release assets
+        run: |
+          ./scripts/package-release.ps1 `
+            -Version "${{ github.ref_name }}" `
+            -Platform "x64" `
+            -Configuration "Release" `
+            -OutputDir "$env:RUNNER_TEMP/sumire-release"
+        shell: pwsh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ runner.temp }}/sumire-release/*.zip
+          generate_release_notes: true
