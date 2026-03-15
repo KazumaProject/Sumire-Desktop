@@ -1105,7 +1105,7 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         {
             _compositionState.ApplyLiveConversionPreview(completedReading, completedCandidates);
         }
-        else if (!_compositionState.HasLiveConversionPreviewForCurrentReading())
+        else if (!_compositionState.HasLiveConversionPreview())
         {
             _compositionState.ClearLiveConversionPreviewState();
         }

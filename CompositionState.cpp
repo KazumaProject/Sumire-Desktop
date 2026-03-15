@@ -1172,7 +1172,12 @@ void CompositionState::RebuildTexts(InputMode mode, const RomajiKanaConverter& c
 {
     _reading = converter.ConvertFromRaw(_rawInput);
     _preedit = BuildPreeditText(_rawInput, mode, converter);
-    ClearLiveConversionPreview();
+    if (_phase != CompositionPhase::Composing ||
+        mode != InputMode::Hiragana ||
+        _alphabeticPreeditActive)
+    {
+        ClearLiveConversionPreview();
+    }
 
     SyncCaretFromRawCursor(mode, converter);
     _preeditCursor = _caretPosition;
@@ -1603,6 +1608,74 @@ LONG CompositionState::RawCursorFromVisibleCursor(const std::wstring& raw, LONG 
     if (visibleCursor <= 0)
     {
         return 0;
+    }
+
+    if (mode == InputMode::Hiragana ||
+        mode == InputMode::HalfwidthKatakana ||
+        mode == InputMode::FullwidthKatakana)
+    {
+        const std::vector<RomajiKanaConverter::ConversionSpan> spans = converter.BuildConversionSpans(raw);
+        LONG visibleOffset = 0;
+        LONG bestRaw = 0;
+
+        for (const RomajiKanaConverter::ConversionSpan& span : spans)
+        {
+            std::wstring visibleText = span.text;
+            switch (mode)
+            {
+            case InputMode::FullwidthKatakana:
+                visibleText = HiraganaToFullwidthKatakana(span.text);
+                break;
+            case InputMode::HalfwidthKatakana:
+                visibleText = HiraganaToHalfwidthKatakana(span.text);
+                break;
+            case InputMode::Hiragana:
+            default:
+                break;
+            }
+
+            const LONG spanVisibleLength = static_cast<LONG>(visibleText.size());
+            if (visibleCursor >= visibleOffset + spanVisibleLength)
+            {
+                visibleOffset += spanVisibleLength;
+                bestRaw = static_cast<LONG>(span.rawEnd);
+                continue;
+            }
+
+            if (visibleCursor <= visibleOffset)
+            {
+                return bestRaw;
+            }
+
+            const size_t rawSpanLength = span.rawEnd - span.rawStart;
+            if (rawSpanLength <= 1)
+            {
+                return static_cast<LONG>(span.rawStart);
+            }
+
+            const LONG targetWithinSpan = visibleCursor - visibleOffset;
+            LONG resolvedRaw = static_cast<LONG>(span.rawStart);
+            const std::wstring rawSpan = raw.substr(span.rawStart, rawSpanLength);
+            for (size_t rawOffset = 1; rawOffset <= rawSpanLength; ++rawOffset)
+            {
+                const LONG partialVisibleLength = static_cast<LONG>(
+                    BuildPreeditText(rawSpan.substr(0, rawOffset), mode, converter).size());
+                if (partialVisibleLength > targetWithinSpan)
+                {
+                    break;
+                }
+
+                resolvedRaw = static_cast<LONG>(span.rawStart + rawOffset);
+                if (partialVisibleLength == targetWithinSpan)
+                {
+                    return resolvedRaw;
+                }
+            }
+
+            return resolvedRaw;
+        }
+
+        return bestRaw;
     }
 
     LONG bestRaw = 0;

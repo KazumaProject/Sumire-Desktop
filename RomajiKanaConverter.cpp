@@ -818,6 +818,98 @@ int EffectiveConsumeLength(const std::wstring& key, const RomajiKanaConverter::M
 
     return consume;
 }
+
+std::vector<RomajiKanaConverter::ConversionSpan> BuildConversionSpansImpl(
+    const std::wstring& raw,
+    const Map& map,
+    int maxKeyLength)
+{
+    std::vector<RomajiKanaConverter::ConversionSpan> spans;
+    spans.reserve(raw.size());
+
+    size_t i = 0;
+    while (i < raw.size())
+    {
+        const wchar_t current = raw[i];
+
+        bool matched = false;
+        for (int len = maxKeyLength; len >= 1; --len)
+        {
+            if (i + static_cast<size_t>(len) > raw.size())
+            {
+                continue;
+            }
+
+            const std::wstring segment = raw.substr(i, static_cast<size_t>(len));
+            const auto it = map.find(segment);
+            if (it == map.end())
+            {
+                std::wstring synthesizedKana;
+                if (TrySynthesizeYoon(map, segment, &synthesizedKana))
+                {
+                    RomajiKanaConverter::ConversionSpan span;
+                    span.rawStart = i;
+                    span.rawEnd = i + segment.size();
+                    span.text = std::move(synthesizedKana);
+                    spans.push_back(std::move(span));
+                    i += segment.size();
+                    matched = true;
+                    break;
+                }
+
+                continue;
+            }
+
+            std::wstring kana = it->second.kana;
+            int consumeLength = EffectiveConsumeLength(segment, it->second);
+            if (ContainsAsciiLetter(kana))
+            {
+                std::wstring synthesizedKana;
+                if (TrySynthesizeYoon(map, segment, &synthesizedKana))
+                {
+                    kana = std::move(synthesizedKana);
+                    consumeLength = static_cast<int>(segment.size());
+                }
+            }
+
+            RomajiKanaConverter::ConversionSpan span;
+            span.rawStart = i;
+            span.rawEnd = i + static_cast<size_t>(consumeLength);
+            span.text = std::move(kana);
+            spans.push_back(std::move(span));
+            i += static_cast<size_t>(consumeLength);
+            matched = true;
+            break;
+        }
+
+        if (!matched && i + 1 < raw.size() && current == raw[i + 1])
+        {
+            const std::wstring sokuonConsonants = L"kstcpbdfghljmqrvwxyz";
+            if (sokuonConsonants.find(current) != std::wstring::npos)
+            {
+                RomajiKanaConverter::ConversionSpan span;
+                span.rawStart = i;
+                span.rawEnd = i + 1;
+                span.text = L"っ";
+                spans.push_back(std::move(span));
+                ++i;
+                continue;
+            }
+        }
+
+        if (!matched)
+        {
+            RomajiKanaConverter::ConversionSpan span;
+            span.rawStart = i;
+            span.rawEnd = i + 1;
+            span.text.assign(1, raw[i]);
+            spans.push_back(std::move(span));
+            ++i;
+        }
+    }
+
+    return spans;
+}
 } // namespace
 
 RomajiKanaConverter::RomajiKanaConverter()
@@ -903,73 +995,17 @@ std::wstring RomajiKanaConverter::FullWidthToHalfWidth(const std::wstring& src)
 
 std::wstring RomajiKanaConverter::ConvertFromRaw(const std::wstring& raw) const
 {
-    const std::wstring text = FullWidthToHalfWidth(raw);
-
     std::wstring result;
-    size_t i = 0;
-
-    while (i < text.size())
+    for (const ConversionSpan& span : BuildConversionSpans(raw))
     {
-        const wchar_t current = text[i];
-
-        bool matched = false;
-        for (int len = m_maxKeyLength; len >= 1; --len)
-        {
-            if (i + len > text.size())
-            {
-                continue;
-            }
-
-            const std::wstring segment = text.substr(i, len);
-            const auto it = m_romajiToKana.find(segment);
-            if (it == m_romajiToKana.end())
-            {
-                std::wstring synthesizedKana;
-                if (TrySynthesizeYoon(m_romajiToKana, segment, &synthesizedKana))
-                {
-                    result.append(synthesizedKana);
-                    i += static_cast<size_t>(segment.size());
-                    matched = true;
-                    break;
-                }
-                continue;
-            }
-
-            std::wstring kana = it->second.kana;
-            int consumeLength = EffectiveConsumeLength(segment, it->second);
-            if (ContainsAsciiLetter(kana))
-            {
-                std::wstring synthesizedKana;
-                if (TrySynthesizeYoon(m_romajiToKana, segment, &synthesizedKana))
-                {
-                    kana = std::move(synthesizedKana);
-                    consumeLength = static_cast<int>(segment.size());
-                }
-            }
-
-            result.append(kana);
-            i += static_cast<size_t>(consumeLength);
-            matched = true;
-            break;
-        }
-
-        if (!matched && i + 1 < text.size() && current == text[i + 1])
-        {
-            const std::wstring sokuonConsonants = L"kstcpbdfghljmqrvwxyz";
-            if (sokuonConsonants.find(current) != std::wstring::npos)
-            {
-                result.push_back(L'っ');
-                ++i;
-                continue;
-            }
-        }
-
-        if (!matched)
-        {
-            result.push_back(text[i]);
-            ++i;
-        }
+        result.append(span.text);
     }
 
     return result;
+}
+
+std::vector<RomajiKanaConverter::ConversionSpan> RomajiKanaConverter::BuildConversionSpans(
+    const std::wstring& raw) const
+{
+    return BuildConversionSpansImpl(FullWidthToHalfWidth(raw), m_romajiToKana, m_maxKeyLength);
 }
