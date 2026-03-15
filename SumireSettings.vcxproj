@@ -135,10 +135,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="PersonNameLexicon.cpp" />
     <ClCompile Include="SumireSettingsApp.cpp" />
     <ClCompile Include="SumireSettingsStore.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ConversionTypes.h" />
+    <ClInclude Include="ILexicon.h" />
+    <ClInclude Include="PersonNameLexicon.h" />
     <ClInclude Include="SumireSettingsStore.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -3,6 +3,7 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <strsafe.h>
+#include <tlhelp32.h>
 
 #include "Globals.h"
 #include "SumireSettingsStore.h"
@@ -144,6 +145,11 @@ bool TryReplaceFile(const std::filesystem::path& sourceFile, const std::filesyst
     }
 
     return false;
+}
+
+bool EqualsIgnoreCase(const wchar_t* lhs, const wchar_t* rhs)
+{
+    return CompareStringOrdinal(lhs, -1, rhs, -1, TRUE) == CSTR_EQUAL;
 }
 }
 
@@ -471,6 +477,52 @@ bool DeactivateTextServiceProfile()
     }
 
     return success;
+}
+
+bool StopProcessesByName(const wchar_t* processName)
+{
+    if (processName == nullptr || *processName == L'\0')
+    {
+        return false;
+    }
+
+    bool found = false;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    PROCESSENTRY32W entry = {};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            if (!EqualsIgnoreCase(entry.szExeFile, processName))
+            {
+                continue;
+            }
+
+            found = true;
+            HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+            if (process == nullptr)
+            {
+                continue;
+            }
+
+            if (TerminateProcess(process, 0))
+            {
+                WaitForSingleObject(process, 3000);
+            }
+
+            CloseHandle(process);
+        }
+        while (Process32NextW(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return found;
 }
 
 bool WriteInstallMetadata(const std::filesystem::path& installDirectory, const std::filesystem::path& uninstallExePath)

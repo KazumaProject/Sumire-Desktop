@@ -191,6 +191,7 @@
     <ClCompile Include="TextService.cpp" />
     <ClCompile Include="ThreadMgrEventSink.cpp" />
     <ClCompile Include="ThreadFocusSink.cpp" />
+    <ClCompile Include="ZenzClient.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BuiltInSystemLexicon.h" />
@@ -216,6 +217,8 @@
     <ClInclude Include="RomajiKanaConverter.h" />
     <ClInclude Include="SumireSettingsStore.h" />
     <ClInclude Include="TextService.h" />
+    <ClInclude Include="ZenzClient.h" />
+    <ClInclude Include="ZenzProtocol.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TextService.rc" />

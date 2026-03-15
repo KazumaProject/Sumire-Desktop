@@ -1,0 +1,6 @@
+[submodule "AJIMEE-Bench"]
+	path = AJIMEE-Bench
+	url = https://github.com/azooKey/AJIMEE-Bench.git
+[submodule "third_party/llama.cpp"]
+	path = third_party/llama.cpp
+	url = https://github.com/azooKey/llama.cpp.git

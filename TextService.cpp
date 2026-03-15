@@ -24,6 +24,7 @@ namespace
 {
 constexpr UINT WM_SUMIRE_LIVE_CONVERSION_READY = WM_APP + 0x120;
 const wchar_t kLiveConversionWindowClassName[] = L"SumireLiveConversionWindow";
+const wchar_t kLiveConversionSourceViewWindowClassName[] = L"SumireLiveConversionSourceViewWindow";
 constexpr auto kLiveConversionDebounce = std::chrono::milliseconds(45);
 
 LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -40,6 +41,39 @@ LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam
     {
         textService->_ApplyCompletedLiveConversionPreview();
         return 0;
+    }
+
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+LRESULT CALLBACK LiveConversionSourceViewWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_NCCREATE)
+    {
+        const CREATESTRUCTW* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+        return TRUE;
+    }
+
+    CTextService* textService = reinterpret_cast<CTextService*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (textService == nullptr)
+    {
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    switch (message)
+    {
+    case WM_PAINT:
+        {
+            PAINTSTRUCT ps = {};
+            HDC hdc = BeginPaint(hwnd, &ps);
+            textService->_PaintLiveConversionSourceView(hdc, ps.rcPaint);
+            EndPaint(hwnd, &ps);
+        }
+        return 0;
+
+    default:
+        break;
     }
 
     return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -73,6 +107,62 @@ public:
     {
         return _pTextService->_UpdateCompositionText(ec, _pContext);
     }
+};
+
+class CLiveConversionSourceViewEditSession : public CEditSessionBase
+{
+public:
+    CLiveConversionSourceViewEditSession(
+        CTextService* pTextService,
+        ITfContext* pContext,
+        ITfContextView* pContextView,
+        ITfRange* pRangeComposition)
+        : CEditSessionBase(pTextService, pContext)
+        , _pContextView(pContextView)
+        , _pRangeComposition(pRangeComposition)
+    {
+        if (_pContextView != NULL)
+        {
+            _pContextView->AddRef();
+        }
+        if (_pRangeComposition != NULL)
+        {
+            _pRangeComposition->AddRef();
+        }
+    }
+
+    ~CLiveConversionSourceViewEditSession()
+    {
+        if (_pRangeComposition != NULL)
+        {
+            _pRangeComposition->Release();
+        }
+        if (_pContextView != NULL)
+        {
+            _pContextView->Release();
+        }
+    }
+
+    STDMETHODIMP DoEditSession(TfEditCookie ec)
+    {
+        if (_pContextView == NULL || _pRangeComposition == NULL)
+        {
+            return S_OK;
+        }
+
+        RECT rc = {};
+        BOOL clipped = FALSE;
+        if (SUCCEEDED(_pContextView->GetTextExt(ec, _pRangeComposition, &rc, &clipped)))
+        {
+            _pTextService->_UpdateLiveConversionSourceViewFromRect(rc);
+        }
+
+        return S_OK;
+    }
+
+private:
+    ITfContextView* _pContextView;
+    ITfRange* _pRangeComposition;
 };
 
 //+---------------------------------------------------------------------------
@@ -167,13 +257,16 @@ CTextService::CTextService()
     //
     _compositionPhase = CompositionPhase::Idle;
     _liveConversionEnabled = TRUE;
+    _liveConversionSourceViewEnabled = TRUE;
     _candidatePageSize = 9;
     _pendingAlphabeticShift = FALSE;
     _liveConversionWindow = NULL;
+    _liveConversionSourceViewWindow = NULL;
     _liveConversionWorkerRunning = false;
     _liveConversionHasPendingRequest = false;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
+    _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
 
@@ -212,11 +305,14 @@ CTextService::~CTextService()
     _gaDisplayAttributeFocusedConverted = TF_INVALID_GUIDATOM;
 
     _compositionPhase = CompositionPhase::Idle;
+    _liveConversionSourceViewEnabled = TRUE;
     _liveConversionWindow = NULL;
+    _liveConversionSourceViewWindow = NULL;
     _liveConversionWorkerRunning = false;
     _liveConversionHasPendingRequest = false;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
+    _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _tfClientId = TF_CLIENTID_NULL;
@@ -403,6 +499,9 @@ STDAPI CTextService::ActivateEx(ITfThreadMgr* pThreadMgr, TfClientId tfClientId,
     if (!_InitLiveConversionAsync())
         goto ExitError;
 
+    if (!_InitLiveConversionSourceView())
+        goto ExitError;
+
     DebugLog(L"[ActivateEx] success\r\n");
     return S_OK;
 
@@ -421,6 +520,7 @@ ExitError:
 STDAPI CTextService::Deactivate()
 {
     _UninitLiveConversionAsync();
+    _UninitLiveConversionSourceView();
 
     // delete the candidate list object if it exists.
     if (_pCandidateList != NULL)
@@ -628,12 +728,14 @@ BOOL CTextService::_InitLiveConversionAsync()
                 _liveConversionHasPendingRequest = false;
             }
 
+            KanaKanjiConverter::ConvertOptions convertOptions;
+            convertOptions.useZenz = false;
             ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
             {
                 std::lock_guard<std::mutex> lock(_liveConversionMutex);
                 return !_liveConversionWorkerRunning ||
                     version != _liveConversionLatestRequestedVersion;
-            });
+            }, convertOptions);
 
             bool shouldNotify = false;
             {
@@ -734,11 +836,199 @@ bool CTextService::_CanUseLiveConversionPreview() const
         GetEffectiveInputMode() == InputMode::Hiragana;
 }
 
+BOOL CTextService::_InitLiveConversionSourceView()
+{
+    if (_liveConversionSourceViewWindow != NULL)
+    {
+        return TRUE;
+    }
+
+    WNDCLASSW windowClass = {};
+    windowClass.lpfnWndProc = LiveConversionSourceViewWindowProc;
+    windowClass.hInstance = g_hInst;
+    windowClass.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    windowClass.lpszClassName = kLiveConversionSourceViewWindowClassName;
+    RegisterClassW(&windowClass);
+
+    _liveConversionSourceViewWindow = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        kLiveConversionSourceViewWindowClassName,
+        L"",
+        WS_POPUP | WS_DISABLED,
+        0, 0, 0, 0,
+        NULL,
+        NULL,
+        g_hInst,
+        this);
+    return _liveConversionSourceViewWindow != NULL;
+}
+
+void CTextService::_UninitLiveConversionSourceView()
+{
+    _HideLiveConversionSourceView();
+    if (_liveConversionSourceViewWindow != NULL)
+    {
+        DestroyWindow(_liveConversionSourceViewWindow);
+        _liveConversionSourceViewWindow = NULL;
+    }
+}
+
+void CTextService::_HideLiveConversionSourceView()
+{
+    _liveConversionSourceViewText.clear();
+    _liveConversionSourceViewBusy = false;
+    if (_liveConversionSourceViewWindow != NULL)
+    {
+        ShowWindow(_liveConversionSourceViewWindow, SW_HIDE);
+    }
+}
+
+bool CTextService::_IsLiveConversionBusyForCurrentReading(const std::wstring& reading)
+{
+    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+    return !reading.empty() &&
+        _liveConversionLatestRequestedReading == reading &&
+        _liveConversionCompletedVersion != _liveConversionLatestRequestedVersion;
+}
+
+void CTextService::_RequestLiveConversionSourceViewUpdate(ITfContext* pContext, ITfRange* pRangeComposition)
+{
+    if (_liveConversionSourceViewEnabled == FALSE ||
+        !_CanUseLiveConversionPreview() ||
+        pContext == NULL ||
+        pRangeComposition == NULL)
+    {
+        _HideLiveConversionSourceView();
+        return;
+    }
+
+    const std::wstring reading = _compositionState.GetReading();
+    if (reading.empty() || !_InitLiveConversionSourceView())
+    {
+        _HideLiveConversionSourceView();
+        return;
+    }
+
+    ITfContextView* contextView = NULL;
+    if (FAILED(pContext->GetActiveView(&contextView)) || contextView == NULL)
+    {
+        _HideLiveConversionSourceView();
+        return;
+    }
+
+    CLiveConversionSourceViewEditSession* editSession =
+        new CLiveConversionSourceViewEditSession(this, pContext, contextView, pRangeComposition);
+    contextView->Release();
+    if (editSession == NULL)
+    {
+        return;
+    }
+
+    HRESULT hr = E_FAIL;
+    pContext->RequestEditSession(_tfClientId, editSession, TF_ES_ASYNCDONTCARE | TF_ES_READ, &hr);
+    editSession->Release();
+    if (FAILED(hr))
+    {
+        _HideLiveConversionSourceView();
+    }
+}
+
+void CTextService::_UpdateLiveConversionSourceViewFromRect(const RECT& rc)
+{
+    if (_liveConversionSourceViewEnabled == FALSE || !_CanUseLiveConversionPreview())
+    {
+        _HideLiveConversionSourceView();
+        return;
+    }
+
+    const std::wstring reading = _compositionState.GetReading();
+    if (reading.empty() || !_InitLiveConversionSourceView())
+    {
+        _HideLiveConversionSourceView();
+        return;
+    }
+
+    _liveConversionSourceViewText = reading;
+    _liveConversionSourceViewBusy = _IsLiveConversionBusyForCurrentReading(reading);
+
+    const int iconWidth = _liveConversionSourceViewBusy ? 14 : 0;
+    const int paddingX = 8;
+    const int paddingY = 5;
+
+    HDC screenDc = GetDC(NULL);
+    SIZE textSize = {};
+    HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    HFONT oldFont = static_cast<HFONT>(SelectObject(screenDc, font));
+    GetTextExtentPoint32W(
+        screenDc,
+        _liveConversionSourceViewText.c_str(),
+        static_cast<int>(_liveConversionSourceViewText.size()),
+        &textSize);
+    SelectObject(screenDc, oldFont);
+    ReleaseDC(NULL, screenDc);
+
+    const int width = textSize.cx + paddingX * 2 + iconWidth + (_liveConversionSourceViewBusy ? 6 : 0);
+    const int height = (std::max)(24, static_cast<int>(textSize.cy) + paddingY * 2);
+    const int x = rc.right + 8;
+    const int y = rc.bottom + 4;
+
+    MoveWindow(_liveConversionSourceViewWindow, x, y, width, height, TRUE);
+    ShowWindow(_liveConversionSourceViewWindow, SW_SHOWNOACTIVATE);
+    InvalidateRect(_liveConversionSourceViewWindow, NULL, TRUE);
+}
+
+void CTextService::_PaintLiveConversionSourceView(HDC hdc, const RECT& bounds) const
+{
+    HBRUSH background = CreateSolidBrush(RGB(255, 252, 245));
+    FillRect(hdc, &bounds, background);
+    DeleteObject(background);
+
+    HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(198, 186, 164));
+    HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+    Rectangle(hdc, bounds.left, bounds.top, bounds.right, bounds.bottom);
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(borderPen);
+
+    int textLeft = bounds.left + 8;
+    if (_liveConversionSourceViewBusy)
+    {
+        HBRUSH busyBrush = CreateSolidBrush(RGB(0, 120, 215));
+        const int centerY = (bounds.top + bounds.bottom) / 2;
+        const RECT iconRect = { bounds.left + 8, centerY - 4, bounds.left + 16, centerY + 4 };
+        FillRect(hdc, &iconRect, busyBrush);
+        DeleteObject(busyBrush);
+        textLeft = bounds.left + 22;
+    }
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(64, 54, 40));
+    HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    HGDIOBJ oldFont = SelectObject(hdc, font);
+    RECT textRect = bounds;
+    textRect.left = textLeft;
+    DrawTextW(
+        hdc,
+        _liveConversionSourceViewText.c_str(),
+        static_cast<int>(_liveConversionSourceViewText.size()),
+        &textRect,
+        DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+    SelectObject(hdc, oldFont);
+}
+
 void CTextService::_ReloadSettings()
 {
     const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
     _liveConversionEnabled = settings.liveConversionEnabled ? TRUE : FALSE;
+    _liveConversionSourceViewEnabled = settings.liveConversionSourceViewEnabled ? TRUE : FALSE;
+    if (_liveConversionSourceViewEnabled == FALSE)
+    {
+        _HideLiveConversionSourceView();
+    }
     _candidatePageSize = settings.candidatePageSize;
+    _kanaKanjiConverter = KanaKanjiConverter();
     _romajiConverter.ReloadFromSettings();
 }
 
@@ -1143,6 +1433,7 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
     {
         _CancelLiveConversionRequests();
         _compositionState.ClearLiveConversionPreviewState();
+        _HideLiveConversionSourceView();
     }
 
     const std::wstring& preedit = _compositionState.GetPreedit();
@@ -1197,6 +1488,8 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         {
             _SetCompositionDisplayAttributes(ec, pContext, _gaDisplayAttributeInput);
         }
+
+        _RequestLiveConversionSourceViewUpdate(pContext, pRangeComposition);
     }
 
     pRangeComposition->Release();
@@ -1218,6 +1511,7 @@ HRESULT CTextService::_ClearCompositionText(TfEditCookie ec, ITfContext* pContex
 
     _MarkInternalEdit();
     HRESULT hr = pRangeComposition->SetText(ec, 0, L"", 0);
+    _HideLiveConversionSourceView();
     if (SUCCEEDED(hr))
     {
         TF_SELECTION tfSelection = {};
@@ -1240,6 +1534,7 @@ HRESULT CTextService::_ClearCompositionText(TfEditCookie ec, ITfContext* pContex
 void CTextService::_ResetCompositionState()
 {
     _CancelLiveConversionRequests();
+    _HideLiveConversionSourceView();
     _compositionState.Reset();
     _composingText.Reset();
     _compositionPhase = CompositionPhase::Idle;

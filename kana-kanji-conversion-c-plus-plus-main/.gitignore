@@ -1,0 +1,81 @@
+# ----------------------------------------------------------------------
+# CMake 生成ファイル (インソースビルドをしてしまった場合用)
+# ----------------------------------------------------------------------
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# ----------------------------------------------------------------------
+# ビルドディレクトリ (アウトオブソースビルド推奨)
+# 一般的なビルドフォルダ名を指定
+# ----------------------------------------------------------------------
+/build/
+/build*/
+/out/
+/bin/
+/lib/
+
+# ----------------------------------------------------------------------
+# コンパイル済みオブジェクトとバイナリ
+# ----------------------------------------------------------------------
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+*.out
+*.app
+
+# ----------------------------------------------------------------------
+# IDE / エディタ設定 (個人の環境設定はコミットしないのが一般的)
+# ----------------------------------------------------------------------
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# CLion / IntelliJ
+.idea/
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.ipch
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Vim / Emacs / Editors
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ----------------------------------------------------------------------
+# その他
+# ----------------------------------------------------------------------
+# コンパイル時の依存関係ファイル
+*.d
+
+src/dictionary_builder/mozc_fetch/dictionary*.txt
+src/dictionary_builder/mozc_fetch/connection_single_column.txt
+
+failed_*.jsonl
+models

@@ -11,6 +11,10 @@ class PersonNameLexicon : public ILexicon
 {
 public:
     explicit PersonNameLexicon(const std::filesystem::path& path);
+    static bool BuildBinaryFromText(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& outputPath,
+        std::wstring* errorMessage);
 
     virtual DictionaryKind GetKind() const override;
     virtual void LookupPrefix(const std::wstring& reading, size_t start, std::vector<LexiconEntry>* out) const override;
@@ -21,6 +25,8 @@ public:
 
 private:
     void LoadFile(const std::filesystem::path& path);
+    void LoadTextFile(const std::filesystem::path& path);
+    void LoadBinaryFile(const std::filesystem::path& path);
 
     std::unordered_map<std::wstring, std::vector<LexiconEntry>> _entriesByReading;
     std::vector<size_t> _readingLengths;

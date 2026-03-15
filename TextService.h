@@ -177,6 +177,8 @@ public:
     void _MarkInternalEdit();
     InputMode _GetCompositionInputMode() const;
     void _ApplyCompletedLiveConversionPreview();
+    void _PaintLiveConversionSourceView(HDC hdc, const RECT& bounds) const;
+    void _UpdateLiveConversionSourceViewFromRect(const RECT& rc);
 
 private:
     BOOL _InitLiveConversionAsync();
@@ -184,6 +186,11 @@ private:
     void _QueueLiveConversionRequest(const std::wstring& reading);
     void _CancelLiveConversionRequests();
     bool _CanUseLiveConversionPreview() const;
+    BOOL _InitLiveConversionSourceView();
+    void _UninitLiveConversionSourceView();
+    void _HideLiveConversionSourceView();
+    void _RequestLiveConversionSourceViewUpdate(ITfContext* pContext, ITfRange* pRangeComposition);
+    bool _IsLiveConversionBusyForCurrentReading(const std::wstring& reading);
     void _ReloadSettings();
 
     // initialize and uninitialize ThreadMgrEventSink.
@@ -257,9 +264,11 @@ private:
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
+    BOOL _liveConversionSourceViewEnabled;
     int _candidatePageSize;
     BOOL _pendingAlphabeticShift;
     HWND _liveConversionWindow;
+    HWND _liveConversionSourceViewWindow;
     std::thread _liveConversionWorker;
     std::mutex _liveConversionMutex;
     std::condition_variable _liveConversionCv;
@@ -272,6 +281,8 @@ private:
     std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
     std::uint64_t _liveConversionLatestRequestedVersion;
     std::uint64_t _liveConversionCompletedVersion;
+    std::wstring _liveConversionSourceViewText;
+    bool _liveConversionSourceViewBusy;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;

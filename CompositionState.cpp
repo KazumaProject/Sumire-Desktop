@@ -446,7 +446,9 @@ void CompositionState::RefreshLiveConversionPreview(
         return;
     }
 
-    const ConversionResult result = kanaKanjiConverter.Convert(_reading);
+    KanaKanjiConverter::ConvertOptions convertOptions;
+    convertOptions.useZenz = false;
+    const ConversionResult result = kanaKanjiConverter.Convert(_reading, convertOptions);
     _liveConversionCandidates = result.candidates;
     _liveConversionReadingCache = _reading;
     if (_liveConversionCandidates.empty() || _liveConversionCandidates[0].surface.empty())
