@@ -431,7 +431,7 @@ void CompositionState::RefreshLiveConversionPreview(
     if (!enabled ||
         _phase != CompositionPhase::Composing ||
         _rawInput.empty() ||
-        (_caretPosition + 1) < static_cast<LONG>(_preedit.size()) ||
+        _caretPosition < static_cast<LONG>(_preedit.size()) ||
         mode != InputMode::Hiragana ||
         _alphabeticPreeditActive)
     {
@@ -478,6 +478,7 @@ void CompositionState::ApplyLiveConversionPreview(
     if (_phase != CompositionPhase::Composing ||
         _alphabeticPreeditActive ||
         reading != _reading ||
+        _caretPosition < static_cast<LONG>(_preedit.size()) ||
         candidates.empty() ||
         candidates[0].surface.empty())
     {
@@ -1172,12 +1173,7 @@ void CompositionState::RebuildTexts(InputMode mode, const RomajiKanaConverter& c
 {
     _reading = converter.ConvertFromRaw(_rawInput);
     _preedit = BuildPreeditText(_rawInput, mode, converter);
-    if (_phase != CompositionPhase::Composing ||
-        mode != InputMode::Hiragana ||
-        _alphabeticPreeditActive)
-    {
-        ClearLiveConversionPreview();
-    }
+    ClearLiveConversionPreview();
 
     SyncCaretFromRawCursor(mode, converter);
     _preeditCursor = _caretPosition;

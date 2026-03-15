@@ -860,6 +860,11 @@ std::vector<RomajiKanaConverter::ConversionSpan> BuildConversionSpansImpl(
                 continue;
             }
 
+            if (segment == L"n" && (i + 1) == raw.size())
+            {
+                continue;
+            }
+
             std::wstring kana = it->second.kana;
             int consumeLength = EffectiveConsumeLength(segment, it->second);
             if (ContainsAsciiLetter(kana))

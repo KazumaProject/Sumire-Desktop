@@ -99,6 +99,52 @@ void ScheduleDeleteOnReboot(const std::filesystem::path& path)
 {
     MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
 }
+
+bool AreEquivalentPaths(const std::filesystem::path& lhs, const std::filesystem::path& rhs)
+{
+    std::error_code ec;
+    return std::filesystem::exists(lhs) &&
+        std::filesystem::exists(rhs) &&
+        std::filesystem::equivalent(lhs, rhs, ec) &&
+        !ec;
+}
+
+bool TryReplaceFile(const std::filesystem::path& sourceFile, const std::filesystem::path& targetFile)
+{
+    if (AreEquivalentPaths(sourceFile, targetFile))
+    {
+        return true;
+    }
+
+    if (CopyFileW(sourceFile.c_str(), targetFile.c_str(), FALSE))
+    {
+        return true;
+    }
+
+    DWORD attributes = GetFileAttributesW(targetFile.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY) != 0)
+    {
+        SetFileAttributesW(targetFile.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+        if (CopyFileW(sourceFile.c_str(), targetFile.c_str(), FALSE))
+        {
+            return true;
+        }
+    }
+
+    const std::filesystem::path backupFile = targetFile.wstring() + L".old";
+    if (MoveFileExW(targetFile.c_str(), backupFile.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        if (CopyFileW(sourceFile.c_str(), targetFile.c_str(), FALSE))
+        {
+            ScheduleDeleteOnReboot(backupFile);
+            return true;
+        }
+
+        MoveFileExW(backupFile.c_str(), targetFile.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    }
+
+    return false;
+}
 }
 
 namespace SumireInstallUtil
@@ -205,9 +251,7 @@ bool CopyFileIntoDirectory(const std::filesystem::path& sourceFile, const std::f
     }
 
     const std::filesystem::path targetFile = targetDirectory / sourceFile.filename();
-    std::error_code ec;
-    std::filesystem::copy_file(sourceFile, targetFile, std::filesystem::copy_options::overwrite_existing, ec);
-    return !ec;
+    return TryReplaceFile(sourceFile, targetFile);
 }
 
 bool CopyDirectoryRecursive(const std::filesystem::path& sourceDirectory, const std::filesystem::path& targetDirectory)

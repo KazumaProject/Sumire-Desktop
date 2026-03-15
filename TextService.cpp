@@ -24,6 +24,7 @@ namespace
 {
 constexpr UINT WM_SUMIRE_LIVE_CONVERSION_READY = WM_APP + 0x120;
 const wchar_t kLiveConversionWindowClassName[] = L"SumireLiveConversionWindow";
+constexpr auto kLiveConversionDebounce = std::chrono::milliseconds(45);
 
 LRESULT CALLBACK LiveConversionWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -174,6 +175,7 @@ CTextService::CTextService()
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
 
     _tfClientId = TF_CLIENTID_NULL;
 
@@ -216,6 +218,7 @@ CTextService::~CTextService()
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _pendingInternalEdits = 0;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _tfClientId = TF_CLIENTID_NULL;
 
     _cRef = 1;
@@ -590,6 +593,7 @@ BOOL CTextService::_InitLiveConversionAsync()
         {
             std::wstring reading;
             std::uint64_t version = 0;
+            std::chrono::steady_clock::time_point requestedAt;
             {
                 std::unique_lock<std::mutex> lock(_liveConversionMutex);
                 _liveConversionCv.wait(lock, [this]()
@@ -602,12 +606,34 @@ BOOL CTextService::_InitLiveConversionAsync()
                     break;
                 }
 
-                reading = _liveConversionPendingReading;
                 version = _liveConversionLatestRequestedVersion;
+                requestedAt = _liveConversionLatestRequestedAt;
+                _liveConversionCv.wait_until(lock, requestedAt + kLiveConversionDebounce, [this, version]()
+                {
+                    return !_liveConversionWorkerRunning ||
+                        _liveConversionLatestRequestedVersion != version;
+                });
+
+                if (!_liveConversionWorkerRunning)
+                {
+                    break;
+                }
+
+                if (_liveConversionLatestRequestedVersion != version)
+                {
+                    continue;
+                }
+
+                reading = _liveConversionPendingReading;
                 _liveConversionHasPendingRequest = false;
             }
 
-            ConversionResult result = _kanaKanjiConverter.Convert(reading);
+            ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
+            {
+                std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                return !_liveConversionWorkerRunning ||
+                    version != _liveConversionLatestRequestedVersion;
+            });
 
             bool shouldNotify = false;
             {
@@ -672,7 +698,8 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
         return;
     }
 
-    if (reading == _liveConversionLatestRequestedReading)
+    if (reading == _liveConversionLatestRequestedReading &&
+        (_liveConversionHasPendingRequest || _liveConversionCompletedReading == reading))
     {
         return;
     }
@@ -680,6 +707,7 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading)
     ++_liveConversionLatestRequestedVersion;
     _liveConversionLatestRequestedReading = reading;
     _liveConversionPendingReading = reading;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::now();
     _liveConversionHasPendingRequest = true;
     _liveConversionCv.notify_one();
 }
@@ -691,6 +719,7 @@ void CTextService::_CancelLiveConversionRequests()
     _liveConversionLatestRequestedReading.clear();
     _liveConversionPendingReading.clear();
     _liveConversionHasPendingRequest = false;
+    _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
     _liveConversionCompletedReading.clear();
     _liveConversionCompletedCandidates.clear();
     _liveConversionCompletedVersion = 0;
@@ -1105,7 +1134,7 @@ HRESULT CTextService::_UpdateCompositionText(TfEditCookie ec, ITfContext* pConte
         {
             _compositionState.ApplyLiveConversionPreview(completedReading, completedCandidates);
         }
-        else if (!_compositionState.HasLiveConversionPreview())
+        else
         {
             _compositionState.ClearLiveConversionPreviewState();
         }

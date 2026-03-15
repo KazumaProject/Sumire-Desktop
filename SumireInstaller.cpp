@@ -308,6 +308,15 @@ void RunInstall(HWND hwnd)
     const std::filesystem::path sourceDirectory = SumireInstallUtil::GetExecutableDirectory();
     const std::filesystem::path installDirectory = std::filesystem::path(state->installDirectory);
 
+    const std::filesystem::path existingInstalledDll = FindFirstExistingFile(
+        installDirectory,
+        {L"Sumite-Desktop.dll", L"TextService.dll"});
+    if (!existingInstalledDll.empty())
+    {
+        SumireInstallUtil::DeactivateTextServiceProfile();
+        SumireInstallUtil::UnregisterTextServiceDll(existingInstalledDll);
+    }
+
     std::wstring error;
     bool success = CopyPayload(sourceDirectory, installDirectory, &error);
 

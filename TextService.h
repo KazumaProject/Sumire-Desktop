@@ -15,6 +15,7 @@
 #define TEXTSERVICE_H
 
 #include <cstdint>
+#include <chrono>
 #include <condition_variable>
 #include <msctf.h>
 #include <mutex>
@@ -266,6 +267,7 @@ private:
     bool _liveConversionHasPendingRequest;
     std::wstring _liveConversionPendingReading;
     std::wstring _liveConversionLatestRequestedReading;
+    std::chrono::steady_clock::time_point _liveConversionLatestRequestedAt;
     std::wstring _liveConversionCompletedReading;
     std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
     std::uint64_t _liveConversionLatestRequestedVersion;
