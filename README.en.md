@@ -70,3 +70,13 @@ Build outputs are typically placed in `x64\Release\`.
 This project started from Microsoft's `UILess Mode Text Service` sample.
 
 - [Windows classic samples / uilessmode](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/winui/input/tsf/textservice/uilessmode)
+
+## License
+
+- The source code in this repository is licensed under [MIT](./LICENSE).
+- This project uses Mozc dictionary data. Those dictionary-related files and notices remain subject to the Mozc license and related dictionary notices:
+  - [google/mozc LICENSE](https://github.com/google/mozc/blob/master/LICENSE)
+- The default zenz model referenced by the installer, [Miwa-Keita/zenz-v3.1-small-gguf](https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf), is marked as `cc-by-sa-4.0` in its model card:
+  - [Hugging Face model card README](https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf/blob/main/README.md)
+
+These third-party licenses apply separately from the MIT license for this repository.

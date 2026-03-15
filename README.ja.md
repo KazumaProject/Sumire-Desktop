@@ -70,3 +70,13 @@ msbuild Sumire.sln /m /p:Configuration=Release /p:Platform=x64
 このプロジェクトは Microsoft の `UILess Mode Text Service` サンプルを出発点にしています。
 
 - [Windows classic samples / uilessmode](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/winui/input/tsf/textservice/uilessmode)
+
+## ライセンス
+
+- このリポジトリのソースコードは [MIT](./LICENSE) で提供します。
+- このプロジェクトは Mozc の辞書データを使用しています。辞書関連ファイルと注意書きには Mozc 側のライセンスおよび辞書データの注意事項が別途適用されます。
+  - [google/mozc LICENSE](https://github.com/google/mozc/blob/master/LICENSE)
+- インストーラーが参照する既定の zenz モデル [Miwa-Keita/zenz-v3.1-small-gguf](https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf) は、モデルカードで `cc-by-sa-4.0` とされています。
+  - [Hugging Face model card README](https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf/blob/main/README.md)
+
+これらのサードパーティライセンスは、このリポジトリの MIT ライセンスとは別に適用されます。
