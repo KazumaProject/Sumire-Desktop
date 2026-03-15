@@ -177,13 +177,21 @@ public:
     void _MarkInternalEdit();
     InputMode _GetCompositionInputMode() const;
     void _ApplyCompletedLiveConversionPreview();
+    void _PaintLiveConversionSourceView(HDC hdc, const RECT& bounds) const;
+    void _UpdateLiveConversionSourceViewFromRect(const RECT& rc);
 
 private:
     BOOL _InitLiveConversionAsync();
     void _UninitLiveConversionAsync();
-    void _QueueLiveConversionRequest(const std::wstring& reading);
+    void _QueueLiveConversionRequest(const std::wstring& reading, const std::wstring& leftContext);
     void _CancelLiveConversionRequests();
     bool _CanUseLiveConversionPreview() const;
+    BOOL _InitLiveConversionSourceView();
+    void _UninitLiveConversionSourceView();
+    void _HideLiveConversionSourceView();
+    void _RequestLiveConversionSourceViewUpdate(ITfContext* pContext, ITfRange* pRangeComposition);
+    bool _IsLiveConversionBusyForCurrentReading(const std::wstring& reading);
+    std::wstring _GetLeftContextText(TfEditCookie ec, ITfRange* pRangeComposition) const;
     void _ReloadSettings();
 
     // initialize and uninitialize ThreadMgrEventSink.
@@ -257,21 +265,30 @@ private:
     KanaKanjiConverter  _kanaKanjiConverter;
     RomajiKanaConverter _romajiConverter;
     BOOL _liveConversionEnabled;
+    BOOL _liveConversionSourceViewEnabled;
     int _candidatePageSize;
     BOOL _pendingAlphabeticShift;
     HWND _liveConversionWindow;
+    HWND _liveConversionSourceViewWindow;
     std::thread _liveConversionWorker;
     std::mutex _liveConversionMutex;
     std::condition_variable _liveConversionCv;
     bool _liveConversionWorkerRunning;
     bool _liveConversionHasPendingRequest;
     std::wstring _liveConversionPendingReading;
+    std::wstring _liveConversionPendingLeftContext;
     std::wstring _liveConversionLatestRequestedReading;
+    std::wstring _liveConversionLatestRequestedLeftContext;
     std::chrono::steady_clock::time_point _liveConversionLatestRequestedAt;
     std::wstring _liveConversionCompletedReading;
+    std::wstring _liveConversionCompletedLeftContext;
     std::vector<ConversionCandidate> _liveConversionCompletedCandidates;
     std::uint64_t _liveConversionLatestRequestedVersion;
     std::uint64_t _liveConversionCompletedVersion;
+    bool _liveConversionCompletedIsFinal;
+    std::wstring _liveConversionSourceViewText;
+    bool _liveConversionSourceViewBusy;
+    std::wstring _converterSettingsSignature;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;

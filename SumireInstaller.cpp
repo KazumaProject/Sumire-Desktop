@@ -137,6 +137,7 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
     const std::filesystem::path dllPath = FindFirstExistingFile(sourceDirectory, {L"Sumite-Desktop.dll", L"TextService.dll"});
     const std::filesystem::path settingsPath = FindFirstExistingFile(sourceDirectory, {L"SumireSettings.exe"});
     const std::filesystem::path uninstallerPath = FindFirstExistingFile(sourceDirectory, {L"SumireUninstaller.exe"});
+    const std::filesystem::path zenzServicePath = FindFirstExistingFile(sourceDirectory, {L"SumireZenzService.exe"});
     const std::filesystem::path romajiMapPath = FindExistingPathUpTree(
         sourceDirectory,
         {std::filesystem::path(L"romaji-hiragana.tsv"),
@@ -144,6 +145,9 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
     const std::filesystem::path dictionariesPath = FindExistingPathUpTree(
         sourceDirectory,
         {std::filesystem::path(L"dictionaries")});
+    const std::filesystem::path modelsPath = FindExistingPathUpTree(
+        sourceDirectory,
+        {std::filesystem::path(L"models")});
 
     if (dllPath.empty() || settingsPath.empty() || uninstallerPath.empty())
     {
@@ -165,6 +169,13 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         return false;
     }
 
+    if (!zenzServicePath.empty() &&
+        !SumireInstallUtil::CopyFileIntoDirectory(zenzServicePath, installDirectory))
+    {
+        *error = L"Zenz service file copy failed.";
+        return false;
+    }
+
     if (!romajiMapPath.empty() &&
         std::filesystem::exists(romajiMapPath) &&
         !SumireInstallUtil::CopyFileIntoDirectory(romajiMapPath, installDirectory))
@@ -178,6 +189,14 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         !SumireInstallUtil::CopyDirectoryRecursive(dictionariesPath, installDirectory / L"dictionaries"))
     {
         *error = L"辞書ファイルのコピーに失敗しました。";
+        return false;
+    }
+
+    if (!modelsPath.empty() &&
+        std::filesystem::exists(modelsPath) &&
+        !SumireInstallUtil::CopyDirectoryRecursive(modelsPath, installDirectory / L"models"))
+    {
+        *error = L"Zenz model files copy failed.";
         return false;
     }
 
@@ -317,6 +336,9 @@ void RunInstall(HWND hwnd)
         SumireInstallUtil::UnregisterTextServiceDll(existingInstalledDll);
     }
 
+    SumireInstallUtil::StopProcessesByName(L"SumireZenzService.exe");
+    SumireInstallUtil::StopProcessesByName(L"ctfmon.exe");
+
     std::wstring error;
     bool success = CopyPayload(sourceDirectory, installDirectory, &error);
 
@@ -368,6 +390,10 @@ void RunInstall(HWND hwnd)
     }
     else
     {
+        if (error.empty())
+        {
+            error = L"Install failed. The IME DLL may still be in use. Sign out of Windows and try again.";
+        }
         SetWindowTextW(state->status, error.c_str());
     }
 

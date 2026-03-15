@@ -20,6 +20,8 @@
 #include "LexiconRegistry.h"
 #include "MozcSystemLexicon.h"
 #include "PersonNameLexicon.h"
+#include "SumireSettingsStore.h"
+#include "ZenzClient.h"
 
 namespace
 {
@@ -390,38 +392,20 @@ std::vector<std::filesystem::path> GetMozcDictionaryDirectories()
     return unique;
 }
 
-void AppendPersonFileVariants(std::vector<std::filesystem::path>* out, const std::filesystem::path& base)
-{
-    if (base.empty())
-    {
-        return;
-    }
-
-    std::filesystem::path current = base;
-    for (int depth = 0; depth < 5; ++depth)
-    {
-        out->push_back(current / L"dictionaries" / L"names" / L"filtered_names.txt");
-        out->push_back(current / L"dictionaries" / L"filtered_names.txt");
-        out->push_back(current / L"filtered_names.txt");
-
-        if (!current.has_parent_path())
-        {
-            break;
-        }
-
-        const std::filesystem::path parent = current.parent_path();
-        if (parent == current)
-        {
-            break;
-        }
-
-        current = parent;
-    }
-}
-
 std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
 {
     std::vector<std::filesystem::path> candidates;
+
+    const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    for (const auto& profile : settings.personNameDictionaryProfiles)
+    {
+        if (!profile.enabled || profile.builtPath.empty())
+        {
+            continue;
+        }
+
+        candidates.push_back(std::filesystem::path(profile.builtPath));
+    }
 
     const std::wstring envFile = ReadEnvVar(L"SUMIRE_PERSON_NAMES_PATH");
     if (!envFile.empty())
@@ -429,19 +413,16 @@ std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
         candidates.push_back(std::filesystem::path(envFile));
     }
 
-    AppendPersonFileVariants(&candidates, GetModuleDirectory());
-    AppendPersonFileVariants(&candidates, std::filesystem::current_path());
-
-    const std::wstring userProfile = ReadEnvVar(L"USERPROFILE");
-    if (!userProfile.empty())
-    {
-        candidates.push_back(std::filesystem::path(userProfile) / L"Downloads" / L"filtered_names.txt");
-    }
-
     std::vector<std::filesystem::path> unique;
     for (const std::filesystem::path& candidate : candidates)
     {
         if (candidate.empty())
+        {
+            continue;
+        }
+
+        std::error_code existsError;
+        if (!std::filesystem::exists(candidate, existsError) || existsError)
         {
             continue;
         }
@@ -464,6 +445,88 @@ std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
     }
 
     return unique;
+}
+
+std::shared_ptr<ZenzClient> BuildZenzClient(const SumireSettingsStore::Settings& settings)
+{
+    ZenzClient::Config config;
+    config.enabled = settings.zenzEnabled;
+    config.modelPreset = settings.zenzModelPreset;
+    config.modelPath = settings.zenzModelPath;
+    config.modelRepo = settings.zenzModelRepo;
+    return std::make_shared<ZenzClient>(std::move(config));
+}
+
+ConversionCandidate BuildSyntheticZenzCandidate(
+    const std::wstring& reading,
+    const std::wstring& surface,
+    const ConversionResult& baseResult)
+{
+    ConversionCandidate candidate;
+    candidate.reading = reading;
+    candidate.surface = surface;
+    candidate.totalCost = baseResult.candidates.empty() ? 0 : baseResult.candidates.front().totalCost - 1;
+
+    BunsetsuConversion bunsetsu;
+    bunsetsu.start = 0;
+    bunsetsu.length = static_cast<int>(reading.size());
+    bunsetsu.reading = reading;
+    bunsetsu.surface = surface;
+    AppendUnique(&bunsetsu.alternatives, surface);
+    if (!baseResult.candidates.empty())
+    {
+        AppendUnique(&bunsetsu.alternatives, baseResult.candidates.front().surface);
+    }
+    AppendUnique(&bunsetsu.alternatives, reading);
+    candidate.bunsetsu.push_back(std::move(bunsetsu));
+    return candidate;
+}
+
+ConversionResult BuildZenzOnlyResult(
+    const std::wstring& reading,
+    const std::wstring& generated)
+{
+    ConversionResult result;
+    if (generated.empty())
+    {
+        return result;
+    }
+
+    result.candidates.push_back(BuildSyntheticZenzCandidate(reading, generated, result));
+    return result;
+}
+
+void FuseZenzCandidate(
+    const std::wstring& reading,
+    const std::wstring& generated,
+    ConversionResult* result)
+{
+    if (result == nullptr || generated.empty())
+    {
+        return;
+    }
+
+    for (size_t index = 0; index < result->candidates.size(); ++index)
+    {
+        if (result->candidates[index].surface == generated)
+        {
+            if (index != 0)
+            {
+                ConversionCandidate candidate = std::move(result->candidates[index]);
+                result->candidates.erase(result->candidates.begin() + index);
+                result->candidates.insert(result->candidates.begin(), std::move(candidate));
+            }
+            return;
+        }
+    }
+
+    result->candidates.insert(
+        result->candidates.begin(),
+        BuildSyntheticZenzCandidate(reading, generated, *result));
+    if (result->candidates.size() > kMaxConversionCandidates)
+    {
+        result->candidates.resize(kMaxConversionCandidates);
+    }
 }
 
 ConversionCandidate BuildConversionCandidateFromTerminal(
@@ -559,6 +622,9 @@ std::wstring BuildCandidateSignature(const ConversionCandidate& candidate)
 KanaKanjiConverter::KanaKanjiConverter()
     : _lexicons(std::make_shared<LexiconRegistry>())
 {
+    const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    _zenzClient = BuildZenzClient(settings);
+
     for (const std::filesystem::path& directory : GetMozcDictionaryDirectories())
     {
         std::shared_ptr<MozcSystemLexicon> mozcLexicon = std::make_shared<MozcSystemLexicon>(directory);
@@ -576,7 +642,6 @@ KanaKanjiConverter::KanaKanjiConverter()
         if (personLexicon->IsLoaded())
         {
             AddLexicon(personLexicon);
-            break;
         }
     }
 
@@ -590,17 +655,49 @@ void KanaKanjiConverter::AddLexicon(const std::shared_ptr<ILexicon>& lexicon)
 
 ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading) const
 {
-    return Convert(reading, std::function<bool()>());
+    return Convert(reading, std::function<bool()>(), ConvertOptions());
+}
+
+ConversionResult KanaKanjiConverter::Convert(const std::wstring& reading, const ConvertOptions& options) const
+{
+    return Convert(reading, std::function<bool()>(), options);
 }
 
 ConversionResult KanaKanjiConverter::Convert(
     const std::wstring& reading,
     const std::function<bool()>& shouldCancel) const
 {
+    return Convert(reading, shouldCancel, ConvertOptions());
+}
+
+ConversionResult KanaKanjiConverter::Convert(
+    const std::wstring& reading,
+    const std::function<bool()>& shouldCancel,
+    const ConvertOptions& options) const
+{
     ConversionResult result;
     if (reading.empty())
     {
         return result;
+    }
+
+    const bool zenzEnabled = options.useZenz && _zenzClient != nullptr && _zenzClient->IsEnabled();
+    if (options.zenzOnly)
+    {
+        if (!zenzEnabled)
+        {
+            return result;
+        }
+
+        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 800u : 1200u;
+        return BuildZenzOnlyResult(
+            reading,
+            _zenzClient->Generate(
+                reading,
+                options.leftContext,
+                timeoutMs,
+                shouldCancel,
+                options.onZenzPartial));
     }
 
     const int kInf = std::numeric_limits<int>::max() / 8;
@@ -795,6 +892,18 @@ ConversionResult KanaKanjiConverter::Convert(
         return result;
     }
 
+    if (zenzEnabled)
+    {
+        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
+        const std::wstring generated = _zenzClient->Generate(
+            reading,
+            options.leftContext,
+            timeoutMs,
+            shouldCancel,
+            options.onZenzPartial);
+        FuseZenzCandidate(reading, generated, &result);
+    }
+
     const ConversionCandidate& bestCandidate = result.candidates[0];
     for (size_t index = 0; index < bestCandidate.bunsetsu.size(); ++index)
     {
@@ -812,4 +921,17 @@ ConversionResult KanaKanjiConverter::Convert(
     }
 
     return result;
+}
+
+bool KanaKanjiConverter::IsZenzEnabled() const
+{
+    return _zenzClient != nullptr && _zenzClient->IsEnabled();
+}
+
+void KanaKanjiConverter::WarmUpZenzAsync() const
+{
+    if (_zenzClient != nullptr)
+    {
+        _zenzClient->WarmUpAsync();
+    }
 }

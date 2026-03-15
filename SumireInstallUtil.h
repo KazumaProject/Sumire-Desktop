@@ -24,6 +24,7 @@ bool RegisterTextServiceDll(const std::filesystem::path& dllPath);
 bool UnregisterTextServiceDll(const std::filesystem::path& dllPath);
 bool ActivateTextServiceProfile();
 bool DeactivateTextServiceProfile();
+bool StopProcessesByName(const wchar_t* processName);
 
 bool WriteInstallMetadata(const std::filesystem::path& installDirectory, const std::filesystem::path& uninstallExePath);
 void RemoveInstallMetadata();

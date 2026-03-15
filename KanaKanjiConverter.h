@@ -10,20 +10,37 @@
 
 class ILexicon;
 class LexiconRegistry;
+class ZenzClient;
 
 class KanaKanjiConverter
 {
 public:
+    struct ConvertOptions
+    {
+        bool useZenz = true;
+        bool zenzOnly = false;
+        std::wstring leftContext;
+        std::function<void(const std::wstring&)> onZenzPartial;
+    };
+
     KanaKanjiConverter();
 
     void AddLexicon(const std::shared_ptr<ILexicon>& lexicon);
     ConversionResult Convert(const std::wstring& reading) const;
+    ConversionResult Convert(const std::wstring& reading, const ConvertOptions& options) const;
     ConversionResult Convert(
         const std::wstring& reading,
         const std::function<bool()>& shouldCancel) const;
+    ConversionResult Convert(
+        const std::wstring& reading,
+        const std::function<bool()>& shouldCancel,
+        const ConvertOptions& options) const;
+    bool IsZenzEnabled() const;
+    void WarmUpZenzAsync() const;
 
 private:
     std::shared_ptr<LexiconRegistry> _lexicons;
+    std::shared_ptr<ZenzClient> _zenzClient;
     std::vector<std::int16_t> _connectionMatrix;
     int _connectionDimension = 0;
 };
