@@ -73,7 +73,7 @@ void LoadSettingsIntoWindow(HWND hwnd)
     wsprintfW(pageSize, L"%d", settings.candidatePageSize);
     SetWindowTextW(state->candidatePageSize, pageSize);
     SetWindowTextW(state->romajiMapPath, settings.romajiMapPath.c_str());
-    SetStatusText(hwnd, L"Changes apply after the IME regains focus.");
+    SetStatusText(hwnd, L"保存した設定は、IME が次にフォーカスを取得したときから反映されます。");
 }
 
 bool SaveSettingsFromWindow(HWND hwnd)
@@ -89,7 +89,11 @@ bool SaveSettingsFromWindow(HWND hwnd)
     const int pageSize = _wtoi(pageSizeBuffer);
     if (pageSize <= 0)
     {
-        MessageBoxW(hwnd, L"Candidate page size must be 1 or greater.", L"Sumire Settings", MB_ICONWARNING | MB_OK);
+        MessageBoxW(
+            hwnd,
+            L"候補ページサイズには 1 以上の数値を入力してください。",
+            L"Sumire 設定",
+            MB_ICONWARNING | MB_OK);
         return false;
     }
 
@@ -103,11 +107,15 @@ bool SaveSettingsFromWindow(HWND hwnd)
 
     if (!SumireSettingsStore::Save(settings))
     {
-        MessageBoxW(hwnd, L"Failed to save settings.", L"Sumire Settings", MB_ICONERROR | MB_OK);
+        MessageBoxW(
+            hwnd,
+            L"設定の保存に失敗しました。",
+            L"Sumire 設定",
+            MB_ICONERROR | MB_OK);
         return false;
     }
 
-    SetStatusText(hwnd, L"Saved. Changes apply after the IME regains focus.");
+    SetStatusText(hwnd, L"設定を保存しました。");
     return true;
 }
 
@@ -123,7 +131,7 @@ void BrowseRomajiMapFile(HWND hwnd)
     OPENFILENAMEW openFileName = {};
     openFileName.lStructSize = sizeof(openFileName);
     openFileName.hwndOwner = hwnd;
-    openFileName.lpstrFilter = L"TSV (*.tsv)\0*.tsv\0All files (*.*)\0*.*\0";
+    openFileName.lpstrFilter = L"TSV ファイル (*.tsv)\0*.tsv\0すべてのファイル (*.*)\0*.*\0";
     openFileName.lpstrFile = filePath;
     openFileName.nMaxFile = ARRAYSIZE(filePath);
     openFileName.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
@@ -142,41 +150,66 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             auto* state = new WindowState();
             SetWindowState(hwnd, state);
 
-            CreateWindowW(L"STATIC", L"Live conversion", WS_CHILD | WS_VISIBLE, 16, 20, 128, 20, hwnd, nullptr, nullptr, nullptr);
+            CreateWindowW(
+                L"STATIC",
+                L"Sumire IME の動作設定を変更します。",
+                WS_CHILD | WS_VISIBLE,
+                16,
+                16,
+                460,
+                20,
+                hwnd,
+                nullptr,
+                nullptr,
+                nullptr);
+
+            CreateWindowW(L"STATIC", L"ライブ変換", WS_CHILD | WS_VISIBLE, 16, 52, 128, 20, hwnd, nullptr, nullptr, nullptr);
             state->liveConversion = CreateWindowW(
                 L"BUTTON",
-                L"Enabled",
+                L"入力中に第1候補を逐次表示する",
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 160,
-                18,
-                120,
+                50,
+                260,
                 24,
                 hwnd,
                 ControlId(kCheckLiveConversion),
                 nullptr,
                 nullptr);
 
-            CreateWindowW(L"STATIC", L"Candidate page size", WS_CHILD | WS_VISIBLE, 16, 58, 128, 20, hwnd, nullptr, nullptr, nullptr);
+            CreateWindowW(L"STATIC", L"候補ページサイズ", WS_CHILD | WS_VISIBLE, 16, 92, 128, 20, hwnd, nullptr, nullptr, nullptr);
             state->candidatePageSize = CreateWindowW(
                 L"EDIT",
                 L"",
                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                 160,
-                56,
+                90,
                 80,
                 24,
                 hwnd,
                 ControlId(kEditCandidatePageSize),
                 nullptr,
                 nullptr);
+            CreateWindowW(
+                L"STATIC",
+                L"候補ウィンドウに 1 ページあたり表示する件数です。",
+                WS_CHILD | WS_VISIBLE,
+                252,
+                92,
+                220,
+                20,
+                hwnd,
+                nullptr,
+                nullptr,
+                nullptr);
 
-            CreateWindowW(L"STATIC", L"Romaji map path", WS_CHILD | WS_VISIBLE, 16, 96, 128, 20, hwnd, nullptr, nullptr, nullptr);
+            CreateWindowW(L"STATIC", L"ローマ字キーマップ", WS_CHILD | WS_VISIBLE, 16, 132, 128, 20, hwnd, nullptr, nullptr, nullptr);
             state->romajiMapPath = CreateWindowW(
                 L"EDIT",
                 L"",
                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                 160,
-                94,
+                130,
                 220,
                 24,
                 hwnd,
@@ -185,10 +218,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 nullptr);
             CreateWindowW(
                 L"BUTTON",
-                L"Browse...",
+                L"参照...",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 388,
-                94,
+                130,
                 76,
                 24,
                 hwnd,
@@ -201,9 +234,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"",
                 WS_CHILD | WS_VISIBLE,
                 16,
-                138,
+                176,
                 448,
-                20,
+                36,
                 hwnd,
                 nullptr,
                 nullptr,
@@ -211,10 +244,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             CreateWindowW(
                 L"BUTTON",
-                L"Save",
+                L"保存",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                 292,
-                176,
+                224,
                 80,
                 28,
                 hwnd,
@@ -223,10 +256,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 nullptr);
             CreateWindowW(
                 L"BUTTON",
-                L"Close",
+                L"閉じる",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 384,
-                176,
+                224,
                 80,
                 28,
                 hwnd,
@@ -290,12 +323,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
     HWND hwnd = CreateWindowExW(
         0,
         kWindowClassName,
-        L"Sumire Settings",
+        L"Sumire 設定",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         500,
-        260,
+        310,
         nullptr,
         nullptr,
         instance,

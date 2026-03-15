@@ -590,6 +590,93 @@ bool ContainsNonAscii(const std::wstring& value)
     return false;
 }
 
+bool ContainsAsciiLetter(const std::wstring& value)
+{
+    for (wchar_t ch : value)
+    {
+        if ((ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z'))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool TryAppendMapKana(const Map& map, const std::wstring& key, std::wstring* out)
+{
+    const auto it = map.find(key);
+    if (it == map.end() || it->second.kana.empty())
+    {
+        return false;
+    }
+
+    out->append(it->second.kana);
+    return true;
+}
+
+bool TrySynthesizeYoon(const Map& map, const std::wstring& segment, std::wstring* kana)
+{
+    if (kana == nullptr)
+    {
+        return false;
+    }
+
+    std::wstring baseKey;
+    std::wstring smallKey;
+
+    if (segment == L"kya" || segment == L"kyu" || segment == L"kyo") baseKey = L"ki";
+    else if (segment == L"gya" || segment == L"gyu" || segment == L"gyo") baseKey = L"gi";
+    else if (segment == L"sya" || segment == L"syu" || segment == L"syo") baseKey = L"si";
+    else if (segment == L"sha" || segment == L"shu" || segment == L"sho") baseKey = L"si";
+    else if (segment == L"zya" || segment == L"zyu" || segment == L"zyo") baseKey = L"zi";
+    else if (segment == L"jya" || segment == L"jyu" || segment == L"jyo") baseKey = L"zi";
+    else if (segment == L"ja" || segment == L"ju" || segment == L"jo") baseKey = L"zi";
+    else if (segment == L"tya" || segment == L"tyu" || segment == L"tyo") baseKey = L"ti";
+    else if (segment == L"cha" || segment == L"chu" || segment == L"cho") baseKey = L"ti";
+    else if (segment == L"cya" || segment == L"cyu" || segment == L"cyo") baseKey = L"ti";
+    else if (segment == L"dya" || segment == L"dyu" || segment == L"dyo") baseKey = L"di";
+    else if (segment == L"nya" || segment == L"nyu" || segment == L"nyo") baseKey = L"ni";
+    else if (segment == L"hya" || segment == L"hyu" || segment == L"hyo") baseKey = L"hi";
+    else if (segment == L"bya" || segment == L"byu" || segment == L"byo") baseKey = L"bi";
+    else if (segment == L"pya" || segment == L"pyu" || segment == L"pyo") baseKey = L"pi";
+    else if (segment == L"mya" || segment == L"myu" || segment == L"myo") baseKey = L"mi";
+    else if (segment == L"rya" || segment == L"ryu" || segment == L"ryo") baseKey = L"ri";
+    else if (segment == L"vya" || segment == L"vyu" || segment == L"vyo") baseKey = L"vi";
+    else if (segment == L"fya" || segment == L"fyu" || segment == L"fyo") baseKey = L"fu";
+    else
+    {
+        return false;
+    }
+
+    if (segment.back() == L'a')
+    {
+        smallKey = L"xya";
+    }
+    else if (segment.back() == L'u')
+    {
+        smallKey = L"xyu";
+    }
+    else if (segment.back() == L'o')
+    {
+        smallKey = L"xyo";
+    }
+    else
+    {
+        return false;
+    }
+
+    std::wstring synthesized;
+    if (!TryAppendMapKana(map, baseKey, &synthesized) ||
+        !TryAppendMapKana(map, smallKey, &synthesized))
+    {
+        return false;
+    }
+
+    *kana = std::move(synthesized);
+    return true;
+}
+
 bool ParseMapData(const std::wstring& content, Map* out)
 {
     if (out == nullptr)
@@ -837,11 +924,31 @@ std::wstring RomajiKanaConverter::ConvertFromRaw(const std::wstring& raw) const
             const auto it = m_romajiToKana.find(segment);
             if (it == m_romajiToKana.end())
             {
+                std::wstring synthesizedKana;
+                if (TrySynthesizeYoon(m_romajiToKana, segment, &synthesizedKana))
+                {
+                    result.append(synthesizedKana);
+                    i += static_cast<size_t>(segment.size());
+                    matched = true;
+                    break;
+                }
                 continue;
             }
 
-            result.append(it->second.kana);
-            i += EffectiveConsumeLength(segment, it->second);
+            std::wstring kana = it->second.kana;
+            int consumeLength = EffectiveConsumeLength(segment, it->second);
+            if (ContainsAsciiLetter(kana))
+            {
+                std::wstring synthesizedKana;
+                if (TrySynthesizeYoon(m_romajiToKana, segment, &synthesizedKana))
+                {
+                    kana = std::move(synthesizedKana);
+                    consumeLength = static_cast<int>(segment.size());
+                }
+            }
+
+            result.append(kana);
+            i += static_cast<size_t>(consumeLength);
             matched = true;
             break;
         }

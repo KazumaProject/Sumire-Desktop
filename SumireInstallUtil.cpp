@@ -4,6 +4,7 @@
 #include <shobjidl.h>
 #include <strsafe.h>
 
+#include "Globals.h"
 #include "SumireSettingsStore.h"
 
 namespace
@@ -324,6 +325,108 @@ bool RegisterTextServiceDll(const std::filesystem::path& dllPath)
 bool UnregisterTextServiceDll(const std::filesystem::path& dllPath)
 {
     return InvokeDllRegistration(dllPath, "DllUnregisterServer");
+}
+
+bool ActivateTextServiceProfile()
+{
+    HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool shouldUninitialize = SUCCEEDED(initHr);
+    if (FAILED(initHr) && initHr != RPC_E_CHANGED_MODE)
+    {
+        return false;
+    }
+
+    ITfInputProcessorProfileMgr* profileMgr = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfInputProcessorProfileMgr,
+        reinterpret_cast<void**>(&profileMgr));
+    if (FAILED(hr) || profileMgr == nullptr)
+    {
+        if (shouldUninitialize)
+        {
+            CoUninitialize();
+        }
+        return false;
+    }
+
+    ITfInputProcessorProfiles* profiles = nullptr;
+    hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfInputProcessorProfiles,
+        reinterpret_cast<void**>(&profiles));
+
+    bool success = true;
+    if (SUCCEEDED(hr) && profiles != nullptr)
+    {
+        profiles->EnableLanguageProfile(c_clsidTextService, TEXTSERVICE_LANGID, c_guidProfile, TRUE);
+        profiles->EnableLanguageProfileByDefault(c_clsidTextService, TEXTSERVICE_LANGID, c_guidProfile, TRUE);
+        profiles->Release();
+    }
+
+    hr = profileMgr->ActivateProfile(
+        TF_PROFILETYPE_INPUTPROCESSOR,
+        TEXTSERVICE_LANGID,
+        c_clsidTextService,
+        c_guidProfile,
+        nullptr,
+        TF_IPPMF_ENABLEPROFILE | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE);
+    success = SUCCEEDED(hr);
+    profileMgr->Release();
+
+    if (shouldUninitialize)
+    {
+        CoUninitialize();
+    }
+
+    return success;
+}
+
+bool DeactivateTextServiceProfile()
+{
+    HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool shouldUninitialize = SUCCEEDED(initHr);
+    if (FAILED(initHr) && initHr != RPC_E_CHANGED_MODE)
+    {
+        return false;
+    }
+
+    ITfInputProcessorProfileMgr* profileMgr = nullptr;
+    HRESULT hr = CoCreateInstance(
+        CLSID_TF_InputProcessorProfiles,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_ITfInputProcessorProfileMgr,
+        reinterpret_cast<void**>(&profileMgr));
+    if (FAILED(hr) || profileMgr == nullptr)
+    {
+        if (shouldUninitialize)
+        {
+            CoUninitialize();
+        }
+        return false;
+    }
+
+    hr = profileMgr->DeactivateProfile(
+        TF_PROFILETYPE_INPUTPROCESSOR,
+        TEXTSERVICE_LANGID,
+        c_clsidTextService,
+        c_guidProfile,
+        nullptr,
+        TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE);
+    const bool success = SUCCEEDED(hr);
+    profileMgr->Release();
+
+    if (shouldUninitialize)
+    {
+        CoUninitialize();
+    }
+
+    return success;
 }
 
 bool WriteInstallMetadata(const std::filesystem::path& installDirectory, const std::filesystem::path& uninstallExePath)

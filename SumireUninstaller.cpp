@@ -44,6 +44,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
 
     const std::filesystem::path installedDll = FindInstalledDll(installDirectory);
+    SumireInstallUtil::DeactivateTextServiceProfile();
     if (!installedDll.empty())
     {
         SumireInstallUtil::UnregisterTextServiceDll(installedDll);

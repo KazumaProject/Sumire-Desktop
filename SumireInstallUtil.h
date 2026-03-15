@@ -22,6 +22,8 @@ bool DeleteDirectoryBestEffort(const std::filesystem::path& directory, bool* reb
 
 bool RegisterTextServiceDll(const std::filesystem::path& dllPath);
 bool UnregisterTextServiceDll(const std::filesystem::path& dllPath);
+bool ActivateTextServiceProfile();
+bool DeactivateTextServiceProfile();
 
 bool WriteInstallMetadata(const std::filesystem::path& installDirectory, const std::filesystem::path& uninstallExePath);
 void RemoveInstallMetadata();
