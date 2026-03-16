@@ -3,9 +3,13 @@
 #include <shlobj.h>
 #include <urlmon.h>
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 #include "SumireInstallUtil.h"
 
@@ -13,6 +17,14 @@ namespace
 {
 constexpr wchar_t kWindowClassName[] = L"SumireInstallerWizard";
 constexpr UINT WM_SUMIRE_START_INSTALL = WM_APP + 0x210;
+
+constexpr wchar_t kDefaultZenzModelRepo[] = L"https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf";
+constexpr wchar_t kDefaultZenzModelRelativePath[] = L"models\\zenz-v3.1-small-gguf\\ggml-model-Q5_K_M.gguf";
+constexpr wchar_t kSettingsShortcutFileName[] = L"Sumire Settings.lnk";
+constexpr wchar_t kUninstallShortcutFileName[] = L"Uninstall Sumire IME.lnk";
+constexpr char kEmbeddedPayloadMagic[] = "SUMIRE_PAYLOAD1";
+constexpr std::uint32_t kEmbeddedPayloadVersion = 1;
+constexpr std::size_t kCopyBufferSize = 64 * 1024;
 
 enum class WizardPage
 {
@@ -29,20 +41,22 @@ enum ControlId
     IdInstallPathLabel = 103,
     IdInstallPathEdit = 104,
     IdBrowse = 105,
-    IdShortcutCheck = 106,
+    IdStartMenuShortcutCheck = 106,
     IdDownloadModelCheck = 107,
     IdLaunchSettingsCheck = 108,
     IdBack = 109,
     IdNext = 110,
     IdCancel = 111,
     IdStatus = 112,
+    IdDesktopSettingsShortcutCheck = 113,
 };
 
 struct WizardState
 {
     WizardPage page = WizardPage::Welcome;
     bool installSucceeded = false;
-    bool createShortcuts = true;
+    bool createStartMenuShortcuts = true;
+    bool createDesktopSettingsShortcut = true;
     bool downloadModelDuringInstall = true;
     bool launchSettingsAfterFinish = false;
     bool installStarted = false;
@@ -54,7 +68,8 @@ struct WizardState
     HWND installPathLabel = nullptr;
     HWND installPathEdit = nullptr;
     HWND browseButton = nullptr;
-    HWND shortcutCheck = nullptr;
+    HWND startMenuShortcutCheck = nullptr;
+    HWND desktopSettingsShortcutCheck = nullptr;
     HWND downloadModelCheck = nullptr;
     HWND launchSettingsCheck = nullptr;
     HWND backButton = nullptr;
@@ -63,8 +78,12 @@ struct WizardState
     HWND status = nullptr;
 };
 
-constexpr wchar_t kDefaultZenzModelRepo[] = L"https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf";
-constexpr wchar_t kDefaultZenzModelRelativePath[] = L"models\\zenz-v3.1-small-gguf\\ggml-model-Q5_K_M.gguf";
+struct EmbeddedPayloadEntry
+{
+    std::filesystem::path relativePath;
+    std::uint64_t offset = 0;
+    std::uint64_t size = 0;
+};
 
 HMENU ControlMenu(int id)
 {
@@ -89,6 +108,312 @@ void SetChecked(HWND hwnd, bool checked)
 bool IsChecked(HWND hwnd)
 {
     return SendMessageW(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
+bool ReadExact(std::ifstream& input, void* buffer, std::size_t size)
+{
+    return static_cast<bool>(
+        input.read(reinterpret_cast<char*>(buffer), static_cast<std::streamsize>(size)));
+}
+
+bool Utf8ToWide(const std::string& value, std::wstring* result)
+{
+    if (result == nullptr)
+    {
+        return false;
+    }
+
+    if (value.empty())
+    {
+        result->clear();
+        return true;
+    }
+
+    const int required = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0);
+    if (required <= 0)
+    {
+        return false;
+    }
+
+    result->assign(static_cast<std::size_t>(required), L'\0');
+    const int converted = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        static_cast<int>(value.size()),
+        &(*result)[0],
+        required);
+    return converted == required;
+}
+
+bool IsSafeRelativePayloadPath(const std::filesystem::path& path)
+{
+    if (path.empty() || path.is_absolute())
+    {
+        return false;
+    }
+
+    const std::filesystem::path normalized = path.lexically_normal();
+    if (normalized.empty() || normalized.is_absolute())
+    {
+        return false;
+    }
+
+    for (const auto& part : normalized)
+    {
+        if (part == L"..")
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool LoadEmbeddedPayloadManifest(
+    const std::filesystem::path& installerPath,
+    std::vector<EmbeddedPayloadEntry>* entries,
+    bool* payloadFound,
+    std::wstring* error)
+{
+    if (entries == nullptr || payloadFound == nullptr)
+    {
+        return false;
+    }
+
+    entries->clear();
+    *payloadFound = false;
+
+    std::ifstream input(installerPath, std::ios::binary);
+    if (!input)
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to open the installer executable.";
+        }
+        return false;
+    }
+
+    input.seekg(0, std::ios::end);
+    const std::streamoff fileSizeOffset = input.tellg();
+    if (fileSizeOffset < 0)
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to determine the installer size.";
+        }
+        return false;
+    }
+
+    const std::uint64_t fileSize = static_cast<std::uint64_t>(fileSizeOffset);
+    const std::size_t magicSize = sizeof(kEmbeddedPayloadMagic) - 1;
+    const std::uint64_t footerSize = sizeof(std::uint64_t) + magicSize;
+    if (fileSize < footerSize)
+    {
+        return true;
+    }
+
+    input.seekg(static_cast<std::streamoff>(fileSize - footerSize), std::ios::beg);
+    std::uint64_t tableSize = 0;
+    std::vector<char> magic(magicSize, '\0');
+    if (!ReadExact(input, &tableSize, sizeof(tableSize)) || !ReadExact(input, magic.data(), magic.size()))
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to read the embedded installer payload.";
+        }
+        return false;
+    }
+
+    if (std::memcmp(magic.data(), kEmbeddedPayloadMagic, magicSize) != 0)
+    {
+        return true;
+    }
+
+    *payloadFound = true;
+    if (tableSize > fileSize - footerSize)
+    {
+        if (error != nullptr)
+        {
+            *error = L"The embedded installer payload is corrupted.";
+        }
+        return false;
+    }
+
+    const std::uint64_t tableStart = fileSize - footerSize - tableSize;
+    input.seekg(static_cast<std::streamoff>(tableStart), std::ios::beg);
+
+    std::uint32_t version = 0;
+    std::uint32_t entryCount = 0;
+    if (!ReadExact(input, &version, sizeof(version)) || !ReadExact(input, &entryCount, sizeof(entryCount)))
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to parse the embedded installer payload.";
+        }
+        return false;
+    }
+
+    if (version != kEmbeddedPayloadVersion)
+    {
+        if (error != nullptr)
+        {
+            *error = L"The embedded installer payload version is not supported.";
+        }
+        return false;
+    }
+
+    entries->reserve(entryCount);
+    for (std::uint32_t index = 0; index < entryCount; ++index)
+    {
+        std::uint32_t pathSize = 0;
+        if (!ReadExact(input, &pathSize, sizeof(pathSize)) || pathSize == 0 || pathSize > 32768)
+        {
+            if (error != nullptr)
+            {
+                *error = L"The embedded installer payload contains an invalid file path.";
+            }
+            return false;
+        }
+
+        std::string relativePathUtf8(pathSize, '\0');
+        EmbeddedPayloadEntry entry;
+        if (!ReadExact(input, &relativePathUtf8[0], relativePathUtf8.size()) ||
+            !ReadExact(input, &entry.offset, sizeof(entry.offset)) ||
+            !ReadExact(input, &entry.size, sizeof(entry.size)))
+        {
+            if (error != nullptr)
+            {
+                *error = L"Failed to read the embedded installer payload entries.";
+            }
+            return false;
+        }
+
+        std::wstring relativePathWide;
+        if (!Utf8ToWide(relativePathUtf8, &relativePathWide))
+        {
+            if (error != nullptr)
+            {
+                *error = L"The embedded installer payload contains an invalid UTF-8 file path.";
+            }
+            return false;
+        }
+
+        entry.relativePath = std::filesystem::path(relativePathWide);
+        if (!IsSafeRelativePayloadPath(entry.relativePath) ||
+            entry.offset > tableStart ||
+            entry.size > tableStart ||
+            entry.offset > tableStart - entry.size)
+        {
+            if (error != nullptr)
+            {
+                *error = L"The embedded installer payload contains an invalid file range.";
+            }
+            return false;
+        }
+
+        entries->push_back(std::move(entry));
+    }
+
+    return true;
+}
+
+bool CopyEmbeddedPayload(
+    const std::filesystem::path& installerPath,
+    const std::filesystem::path& installDirectory,
+    std::wstring* error,
+    bool* payloadFound)
+{
+    std::vector<EmbeddedPayloadEntry> entries;
+    if (!LoadEmbeddedPayloadManifest(installerPath, &entries, payloadFound, error))
+    {
+        return false;
+    }
+
+    if (payloadFound == nullptr || !*payloadFound)
+    {
+        return false;
+    }
+
+    if (!SumireInstallUtil::EnsureDirectory(installDirectory))
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to create the install directory.";
+        }
+        return false;
+    }
+
+    std::ifstream input(installerPath, std::ios::binary);
+    if (!input)
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to reopen the installer executable.";
+        }
+        return false;
+    }
+
+    std::vector<char> buffer(kCopyBufferSize, '\0');
+    for (const EmbeddedPayloadEntry& entry : entries)
+    {
+        const std::filesystem::path targetPath = installDirectory / entry.relativePath;
+        if (!SumireInstallUtil::EnsureDirectory(targetPath.parent_path()))
+        {
+            if (error != nullptr)
+            {
+                *error = L"Failed to create an embedded payload subdirectory.";
+            }
+            return false;
+        }
+
+        std::ofstream output(targetPath, std::ios::binary | std::ios::trunc);
+        if (!output)
+        {
+            if (error != nullptr)
+            {
+                *error = L"Failed to create a file from the embedded payload.";
+            }
+            return false;
+        }
+
+        input.seekg(static_cast<std::streamoff>(entry.offset), std::ios::beg);
+        std::uint64_t remaining = entry.size;
+        while (remaining > 0)
+        {
+            const std::size_t chunkSize = remaining > buffer.size()
+                ? buffer.size()
+                : static_cast<std::size_t>(remaining);
+            if (!ReadExact(input, buffer.data(), chunkSize))
+            {
+                if (error != nullptr)
+                {
+                    *error = L"Failed while extracting the embedded payload.";
+                }
+                return false;
+            }
+
+            output.write(buffer.data(), static_cast<std::streamsize>(chunkSize));
+            if (!output)
+            {
+                if (error != nullptr)
+                {
+                    *error = L"Failed while writing an extracted payload file.";
+                }
+                return false;
+            }
+
+            remaining -= chunkSize;
+        }
+    }
+
+    return true;
 }
 
 std::filesystem::path FindExistingPathUpTree(
@@ -117,6 +442,7 @@ std::filesystem::path FindExistingPathUpTree(
         {
             break;
         }
+
         current = parent;
     }
 
@@ -139,7 +465,10 @@ std::filesystem::path FindFirstExistingFile(
     return std::filesystem::path();
 }
 
-bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesystem::path& installDirectory, std::wstring* error)
+bool CopyPayloadFromDirectory(
+    const std::filesystem::path& sourceDirectory,
+    const std::filesystem::path& installDirectory,
+    std::wstring* error)
 {
     const std::filesystem::path dllPath = FindFirstExistingFile(sourceDirectory, {L"Sumite-Desktop.dll", L"TextService.dll"});
     const std::filesystem::path settingsPath = FindFirstExistingFile(sourceDirectory, {L"SumireSettings.exe"});
@@ -158,13 +487,19 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
 
     if (dllPath.empty() || settingsPath.empty() || uninstallerPath.empty())
     {
-        *error = L"インストーラーの近くに必要なファイルが見つかりません。";
+        if (error != nullptr)
+        {
+            *error = L"Required installer payload files were not found next to the installer.";
+        }
         return false;
     }
 
     if (!SumireInstallUtil::EnsureDirectory(installDirectory))
     {
-        *error = L"インストール先フォルダーを作成できませんでした。";
+        if (error != nullptr)
+        {
+            *error = L"Failed to create the install directory.";
+        }
         return false;
     }
 
@@ -172,14 +507,20 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         !SumireInstallUtil::CopyFileIntoDirectory(settingsPath, installDirectory) ||
         !SumireInstallUtil::CopyFileIntoDirectory(uninstallerPath, installDirectory))
     {
-        *error = L"主要ファイルのコピーに失敗しました。";
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy the main install files.";
+        }
         return false;
     }
 
     if (!zenzServicePath.empty() &&
         !SumireInstallUtil::CopyFileIntoDirectory(zenzServicePath, installDirectory))
     {
-        *error = L"Zenz service file copy failed.";
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy SumireZenzService.exe.";
+        }
         return false;
     }
 
@@ -187,7 +528,10 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         std::filesystem::exists(romajiMapPath) &&
         !SumireInstallUtil::CopyFileIntoDirectory(romajiMapPath, installDirectory))
     {
-        *error = L"romaji-hiragana.tsv のコピーに失敗しました。";
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy romaji-hiragana.tsv.";
+        }
         return false;
     }
 
@@ -195,7 +539,10 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         std::filesystem::exists(dictionariesPath) &&
         !SumireInstallUtil::CopyDirectoryRecursive(dictionariesPath, installDirectory / L"dictionaries"))
     {
-        *error = L"辞書ファイルのコピーに失敗しました。";
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy the dictionaries directory.";
+        }
         return false;
     }
 
@@ -203,7 +550,10 @@ bool CopyPayload(const std::filesystem::path& sourceDirectory, const std::filesy
         std::filesystem::exists(modelsPath) &&
         !SumireInstallUtil::CopyDirectoryRecursive(modelsPath, installDirectory / L"models"))
     {
-        *error = L"Zenz model files copy failed.";
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy the models directory.";
+        }
         return false;
     }
 
@@ -266,7 +616,7 @@ std::wstring BrowseForFolder(HWND owner, const std::wstring& currentPath)
 {
     BROWSEINFOW browseInfo = {};
     browseInfo.hwndOwner = owner;
-    browseInfo.lpszTitle = L"インストール先フォルダーを選択してください。";
+    browseInfo.lpszTitle = L"Choose the Sumire IME install folder.";
     browseInfo.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     PIDLIST_ABSOLUTE itemIdList = SHBrowseForFolderW(&browseInfo);
     if (itemIdList == nullptr)
@@ -304,18 +654,20 @@ void UpdateWizardPage(HWND hwnd)
     SetVisible(state->installPathLabel, showOptions);
     SetVisible(state->installPathEdit, showOptions);
     SetVisible(state->browseButton, showOptions);
-    SetVisible(state->shortcutCheck, showOptions);
+    SetVisible(state->startMenuShortcutCheck, showOptions);
+    SetVisible(state->desktopSettingsShortcutCheck, showOptions);
     SetVisible(state->downloadModelCheck, showOptions);
     SetVisible(state->launchSettingsCheck, showLaunchSettings);
 
     switch (state->page)
     {
     case WizardPage::Welcome:
-        SetWindowTextW(state->title, L"Sumire IME セットアップへようこそ");
+        SetWindowTextW(state->title, L"Welcome to the Sumire IME Setup Wizard");
         SetWindowTextW(
             state->body,
-            L"このウィザードは Sumire IME をインストールします。\r\n\r\n次へ進むと、インストール先やショートカット作成の有無を設定できます。");
-        SetWindowTextW(state->nextButton, L"次へ >");
+            L"This wizard installs Sumire IME.\r\n\r\n"
+            L"Choose Next to configure the install directory and shortcut options.");
+        SetWindowTextW(state->nextButton, L"Next >");
         EnableWindow(state->backButton, FALSE);
         EnableWindow(state->nextButton, TRUE);
         SetVisible(state->cancelButton, true);
@@ -323,11 +675,12 @@ void UpdateWizardPage(HWND hwnd)
         break;
 
     case WizardPage::Options:
-        SetWindowTextW(state->title, L"インストール設定");
+        SetWindowTextW(state->title, L"Install options");
         SetWindowTextW(
             state->body,
-            L"インストール先フォルダーを確認してください。必要に応じてスタートメニューのショートカット作成を無効にできます。");
-        SetWindowTextW(state->nextButton, L"インストール");
+            L"Choose where to install Sumire IME and whether to create shortcuts.\r\n"
+            L"You can also download the default zenz model during installation.");
+        SetWindowTextW(state->nextButton, L"Install");
         EnableWindow(state->backButton, TRUE);
         EnableWindow(state->nextButton, TRUE);
         SetVisible(state->cancelButton, true);
@@ -335,9 +688,11 @@ void UpdateWizardPage(HWND hwnd)
         break;
 
     case WizardPage::Progress:
-        SetWindowTextW(state->title, L"インストール中");
-        SetWindowTextW(state->body, L"必要なファイルをコピーし、IME を登録しています。しばらくお待ちください。");
-        SetWindowTextW(state->nextButton, L"次へ >");
+        SetWindowTextW(state->title, L"Installing");
+        SetWindowTextW(
+            state->body,
+            L"Installing Sumire IME. Please wait until setup finishes.");
+        SetWindowTextW(state->nextButton, L"Next >");
         EnableWindow(state->backButton, FALSE);
         EnableWindow(state->nextButton, FALSE);
         SetVisible(state->cancelButton, false);
@@ -346,20 +701,23 @@ void UpdateWizardPage(HWND hwnd)
     case WizardPage::Finish:
         if (state->installSucceeded)
         {
-            SetWindowTextW(state->title, L"セットアップ完了");
+            SetWindowTextW(state->title, L"Setup complete");
             SetWindowTextW(
                 state->body,
-                L"Sumire IME のインストールが完了しました。\r\n必要に応じて Windows の入力方式一覧から有効化してください。");
-            SetWindowTextW(state->status, L"完了を押すとセットアップを終了します。");
+                L"Sumire IME was installed successfully.\r\n"
+                L"If needed, sign out and back in so Windows reloads the IME.");
+            SetWindowTextW(state->status, L"Setup completed successfully.");
         }
         else
         {
-            SetWindowTextW(state->title, L"セットアップ失敗");
+            SetWindowTextW(state->title, L"Setup failed");
             SetWindowTextW(
                 state->body,
-                L"インストール中にエラーが発生しました。内容を確認して、もう一度実行してください。");
+                L"Setup could not finish.\r\n"
+                L"Review the error below and try again.");
         }
-        SetWindowTextW(state->nextButton, L"完了");
+
+        SetWindowTextW(state->nextButton, L"Finish");
         EnableWindow(state->backButton, FALSE);
         EnableWindow(state->nextButton, TRUE);
         SetVisible(state->cancelButton, false);
@@ -376,15 +734,17 @@ void RunInstall(HWND hwnd)
     }
 
     state->installStarted = true;
-    SetWindowTextW(state->status, L"インストールを開始しています...");
+    SetWindowTextW(state->status, L"Starting setup...");
     UpdateWindow(hwnd);
 
     wchar_t installPath[MAX_PATH] = {};
     GetWindowTextW(state->installPathEdit, installPath, ARRAYSIZE(installPath));
     state->installDirectory = installPath;
-    state->createShortcuts = IsChecked(state->shortcutCheck);
+    state->createStartMenuShortcuts = IsChecked(state->startMenuShortcutCheck);
+    state->createDesktopSettingsShortcut = IsChecked(state->desktopSettingsShortcutCheck);
     state->downloadModelDuringInstall = IsChecked(state->downloadModelCheck);
 
+    const std::filesystem::path installerPath = SumireInstallUtil::GetExecutablePath();
     const std::filesystem::path sourceDirectory = SumireInstallUtil::GetExecutableDirectory();
     const std::filesystem::path installDirectory = std::filesystem::path(state->installDirectory);
 
@@ -401,49 +761,84 @@ void RunInstall(HWND hwnd)
     SumireInstallUtil::StopProcessesByName(L"ctfmon.exe");
 
     std::wstring error;
-    bool success = CopyPayload(sourceDirectory, installDirectory, &error);
+    bool hasEmbeddedPayload = false;
+    bool success = CopyEmbeddedPayload(installerPath, installDirectory, &error, &hasEmbeddedPayload);
+    if (!hasEmbeddedPayload)
+    {
+        success = CopyPayloadFromDirectory(sourceDirectory, installDirectory, &error);
+    }
 
     if (success && state->downloadModelDuringInstall)
     {
-        SetWindowTextW(state->status, L"Downloading default zenz model...");
+        SetWindowTextW(state->status, L"Downloading the default zenz model...");
         UpdateWindow(hwnd);
         success = DownloadDefaultZenzModel(installDirectory, &error);
     }
 
-    const std::filesystem::path installedDll = FindFirstExistingFile(installDirectory, {L"Sumite-Desktop.dll", L"TextService.dll"});
+    const std::filesystem::path installedDll = FindFirstExistingFile(
+        installDirectory,
+        {L"Sumite-Desktop.dll", L"TextService.dll"});
     const std::filesystem::path installedSettings = installDirectory / L"SumireSettings.exe";
     const std::filesystem::path installedUninstaller = installDirectory / L"SumireUninstaller.exe";
 
     if (success && (installedDll.empty() || !SumireInstallUtil::RegisterTextServiceDll(installedDll)))
     {
         success = false;
-        error = L"IME DLL の登録に失敗しました。";
+        error = L"Failed to register the IME DLL.";
     }
 
     if (success && !SumireInstallUtil::ActivateTextServiceProfile())
     {
         success = false;
-        error = L"IME プロファイルの有効化に失敗しました。";
+        error = L"Failed to activate the IME profile.";
     }
 
     if (success && !SumireInstallUtil::WriteInstallMetadata(installDirectory, installedUninstaller))
     {
         success = false;
-        error = L"インストール情報の登録に失敗しました。";
+        error = L"Failed to write install metadata.";
     }
 
-    if (success && state->createShortcuts)
+    if (success)
     {
-        SumireInstallUtil::CreateShortcut(
-            SumireInstallUtil::GetStartMenuShortcutPath(L"Sumire 設定.lnk"),
-            installedSettings,
-            L"Sumire IME の設定を開く",
-            installedSettings);
-        SumireInstallUtil::CreateShortcut(
-            SumireInstallUtil::GetStartMenuShortcutPath(L"Sumire アンインストール.lnk"),
-            installedUninstaller,
-            L"Sumire IME をアンインストールする",
-            installedUninstaller);
+        const std::filesystem::path startMenuSettingsShortcut =
+            SumireInstallUtil::GetStartMenuShortcutPath(kSettingsShortcutFileName);
+        const std::filesystem::path startMenuUninstallShortcut =
+            SumireInstallUtil::GetStartMenuShortcutPath(kUninstallShortcutFileName);
+        const std::filesystem::path desktopSettingsShortcut =
+            SumireInstallUtil::GetDesktopShortcutPath(kSettingsShortcutFileName);
+
+        if (state->createStartMenuShortcuts)
+        {
+            SumireInstallUtil::CreateShortcut(
+                startMenuSettingsShortcut,
+                installedSettings,
+                L"Open Sumire IME settings.",
+                installedSettings);
+            SumireInstallUtil::CreateShortcut(
+                startMenuUninstallShortcut,
+                installedUninstaller,
+                L"Uninstall Sumire IME.",
+                installedUninstaller);
+        }
+        else
+        {
+            SumireInstallUtil::RemoveShortcut(startMenuSettingsShortcut);
+            SumireInstallUtil::RemoveShortcut(startMenuUninstallShortcut);
+        }
+
+        if (state->createDesktopSettingsShortcut)
+        {
+            SumireInstallUtil::CreateShortcut(
+                desktopSettingsShortcut,
+                installedSettings,
+                L"Open Sumire IME settings.",
+                installedSettings);
+        }
+        else
+        {
+            SumireInstallUtil::RemoveShortcut(desktopSettingsShortcut);
+        }
     }
 
     state->installedSettingsPath = installedSettings.wstring();
@@ -454,7 +849,7 @@ void RunInstall(HWND hwnd)
     if (success)
     {
         SetChecked(state->launchSettingsCheck, false);
-        SetWindowTextW(state->status, L"インストールが完了しました。");
+        SetWindowTextW(state->status, L"Setup completed successfully.");
     }
     else
     {
@@ -462,6 +857,7 @@ void RunInstall(HWND hwnd)
         {
             error = L"Install failed. The IME DLL may still be in use. Sign out of Windows and try again.";
         }
+
         SetWindowTextW(state->status, error.c_str());
     }
 
@@ -484,7 +880,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 WS_CHILD | WS_VISIBLE,
                 16,
                 12,
-                460,
+                480,
                 24,
                 hwnd,
                 ControlMenu(IdTitle),
@@ -498,7 +894,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 WS_CHILD | WS_VISIBLE,
                 16,
                 46,
-                460,
+                480,
                 72,
                 hwnd,
                 ControlMenu(IdBody),
@@ -507,7 +903,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             state->installPathLabel = CreateWindowW(
                 L"STATIC",
-                L"インストール先",
+                L"Install folder",
                 WS_CHILD,
                 16,
                 128,
@@ -524,7 +920,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 WS_CHILD | WS_BORDER | ES_AUTOHSCROLL,
                 16,
                 152,
-                360,
+                380,
                 24,
                 hwnd,
                 ControlMenu(IdInstallPathEdit),
@@ -533,9 +929,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             state->browseButton = CreateWindowW(
                 L"BUTTON",
-                L"参照...",
+                L"Browse...",
                 WS_CHILD | BS_PUSHBUTTON,
-                386,
+                406,
                 152,
                 90,
                 24,
@@ -544,27 +940,41 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 nullptr,
                 nullptr);
 
-            state->shortcutCheck = CreateWindowW(
+            state->startMenuShortcutCheck = CreateWindowW(
                 L"BUTTON",
-                L"スタートメニューにショートカットを作成する",
+                L"Create Start Menu shortcuts",
                 WS_CHILD | BS_AUTOCHECKBOX,
                 16,
                 188,
-                260,
+                280,
                 24,
                 hwnd,
-                ControlMenu(IdShortcutCheck),
+                ControlMenu(IdStartMenuShortcutCheck),
                 nullptr,
                 nullptr);
-            SetChecked(state->shortcutCheck, true);
+            SetChecked(state->startMenuShortcutCheck, true);
 
-            state->downloadModelCheck = CreateWindowW(
+            state->desktopSettingsShortcutCheck = CreateWindowW(
                 L"BUTTON",
-                L"Download default zenz model during install",
+                L"Create a desktop shortcut for Sumire Settings",
                 WS_CHILD | BS_AUTOCHECKBOX,
                 16,
                 216,
-                320,
+                340,
+                24,
+                hwnd,
+                ControlMenu(IdDesktopSettingsShortcutCheck),
+                nullptr,
+                nullptr);
+            SetChecked(state->desktopSettingsShortcutCheck, true);
+
+            state->downloadModelCheck = CreateWindowW(
+                L"BUTTON",
+                L"Download the default zenz model during install",
+                WS_CHILD | BS_AUTOCHECKBOX,
+                16,
+                244,
+                360,
                 24,
                 hwnd,
                 ControlMenu(IdDownloadModelCheck),
@@ -577,9 +987,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"",
                 WS_CHILD | WS_VISIBLE,
                 16,
-                248,
-                460,
-                36,
+                280,
+                480,
+                40,
                 hwnd,
                 ControlMenu(IdStatus),
                 nullptr,
@@ -587,11 +997,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             state->launchSettingsCheck = CreateWindowW(
                 L"BUTTON",
-                L"完了後に設定画面を開く",
+                L"Open Sumire Settings after setup closes",
                 WS_CHILD | BS_AUTOCHECKBOX,
                 16,
-                248,
-                200,
+                280,
+                300,
                 24,
                 hwnd,
                 ControlMenu(IdLaunchSettingsCheck),
@@ -600,10 +1010,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             state->backButton = CreateWindowW(
                 L"BUTTON",
-                L"< 戻る",
+                L"< Back",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                214,
-                300,
+                236,
+                336,
                 80,
                 28,
                 hwnd,
@@ -615,8 +1025,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 L"BUTTON",
                 L"",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                304,
-                300,
+                326,
+                336,
                 80,
                 28,
                 hwnd,
@@ -626,10 +1036,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             state->cancelButton = CreateWindowW(
                 L"BUTTON",
-                L"キャンセル",
+                L"Cancel",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                394,
-                300,
+                416,
+                336,
                 80,
                 28,
                 hwnd,
@@ -675,19 +1085,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                     state->page = WizardPage::Options;
                     UpdateWizardPage(hwnd);
                     return 0;
+
                 case WizardPage::Options:
                     state->page = WizardPage::Progress;
                     UpdateWizardPage(hwnd);
                     PostMessageW(hwnd, WM_SUMIRE_START_INSTALL, 0, 0);
                     return 0;
+
                 case WizardPage::Finish:
                     state->launchSettingsAfterFinish = IsChecked(state->launchSettingsCheck);
-                    if (state->installSucceeded && state->launchSettingsAfterFinish && !state->installedSettingsPath.empty())
+                    if (state->installSucceeded &&
+                        state->launchSettingsAfterFinish &&
+                        !state->installedSettingsPath.empty())
                     {
-                        ShellExecuteW(hwnd, L"open", state->installedSettingsPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                        ShellExecuteW(
+                            hwnd,
+                            L"open",
+                            state->installedSettingsPath.c_str(),
+                            nullptr,
+                            nullptr,
+                            SW_SHOWNORMAL);
                     }
+
                     DestroyWindow(hwnd);
                     return 0;
+
                 default:
                     return 0;
                 }
@@ -695,6 +1117,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             case IdCancel:
                 DestroyWindow(hwnd);
                 return 0;
+
             default:
                 return 0;
             }
@@ -731,12 +1154,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
     HWND hwnd = CreateWindowExW(
         0,
         kWindowClassName,
-        L"Sumire IME セットアップ",
+        L"Sumire IME Setup",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        500,
-        380,
+        530,
+        420,
         nullptr,
         nullptr,
         instance,

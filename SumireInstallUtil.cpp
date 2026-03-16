@@ -222,6 +222,16 @@ std::filesystem::path GetInstallDirectoryFromRegistry()
     return installDir;
 }
 
+std::filesystem::path GetDesktopDirectory()
+{
+    return GetKnownFolder(FOLDERID_Desktop);
+}
+
+std::filesystem::path GetDesktopShortcutPath(const wchar_t* fileName)
+{
+    return GetDesktopDirectory() / fileName;
+}
+
 std::filesystem::path GetStartMenuDirectory()
 {
     return GetKnownFolder(FOLDERID_Programs) / kAppFolderName;

@@ -39,5 +39,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/sumire-release/*.zip
+            ${{ runner.temp }}/sumire-release/*-Setup.exe
           generate_release_notes: true
