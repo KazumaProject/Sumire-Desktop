@@ -16,7 +16,8 @@ constexpr wchar_t kZenzServiceEnabledValue[] = L"ZenzServiceEnabled";
 constexpr wchar_t kZenzModelPresetValue[] = L"ZenzModelPreset";
 constexpr wchar_t kZenzModelPathValue[] = L"ZenzModelPath";
 constexpr wchar_t kZenzModelRepoValue[] = L"ZenzModelRepo";
-constexpr wchar_t kProfilesSubKey[] = L"NameDictionaryProfiles";
+constexpr wchar_t kProfilesSubKey[] = L"UserDictionaryProfiles";
+constexpr wchar_t kLegacyProfilesSubKey[] = L"NameDictionaryProfiles";
 constexpr wchar_t kProfileNameValue[] = L"Name";
 constexpr wchar_t kProfileSourcePathValue[] = L"SourcePath";
 constexpr wchar_t kProfileBuiltPathValue[] = L"BuiltPath";
@@ -140,26 +141,29 @@ std::wstring GetDefaultZenzModelRepo(const std::wstring& preset)
     return kDefaultZenzModelRepoSmall;
 }
 
-void LoadProfiles(HKEY settingsKey, std::vector<SumireSettingsStore::PersonNameDictionaryProfile>* profiles)
+void LoadProfilesFromSubKey(
+    HKEY settingsKey,
+    const wchar_t* profilesSubKeyName,
+    std::vector<SumireSettingsStore::UserDictionaryProfile>* profiles)
 {
     profiles->clear();
 
     HKEY profilesKey = nullptr;
-    if (RegOpenKeyExW(settingsKey, kProfilesSubKey, 0, KEY_READ, &profilesKey) != ERROR_SUCCESS)
+    if (RegOpenKeyExW(settingsKey, profilesSubKeyName, 0, KEY_READ, &profilesKey) != ERROR_SUCCESS)
     {
         return;
     }
 
     for (DWORD index = 0;; ++index)
     {
-        wchar_t subKeyName[256] = {};
-        DWORD subKeyNameLength = ARRAYSIZE(subKeyName);
+        wchar_t profileSubKeyName[256] = {};
+        DWORD profileSubKeyNameLength = ARRAYSIZE(profileSubKeyName);
         FILETIME lastWriteTime = {};
         const LONG enumResult = RegEnumKeyExW(
             profilesKey,
             index,
-            subKeyName,
-            &subKeyNameLength,
+            profileSubKeyName,
+            &profileSubKeyNameLength,
             nullptr,
             nullptr,
             nullptr,
@@ -175,13 +179,13 @@ void LoadProfiles(HKEY settingsKey, std::vector<SumireSettingsStore::PersonNameD
         }
 
         HKEY profileKey = nullptr;
-        if (RegOpenKeyExW(profilesKey, subKeyName, 0, KEY_READ, &profileKey) != ERROR_SUCCESS)
+        if (RegOpenKeyExW(profilesKey, profileSubKeyName, 0, KEY_READ, &profileKey) != ERROR_SUCCESS)
         {
             continue;
         }
 
-        SumireSettingsStore::PersonNameDictionaryProfile profile;
-        profile.id = subKeyName;
+        SumireSettingsStore::UserDictionaryProfile profile;
+        profile.id = profileSubKeyName;
         profile.name = ReadStringValue(profileKey, kProfileNameValue);
         profile.sourcePath = ReadStringValue(profileKey, kProfileSourcePathValue);
         profile.builtPath = ReadStringValue(profileKey, kProfileBuiltPathValue);
@@ -197,9 +201,21 @@ void LoadProfiles(HKEY settingsKey, std::vector<SumireSettingsStore::PersonNameD
     RegCloseKey(profilesKey);
 }
 
-void SaveProfiles(HKEY settingsKey, const std::vector<SumireSettingsStore::PersonNameDictionaryProfile>& profiles)
+void LoadProfiles(HKEY settingsKey, std::vector<SumireSettingsStore::UserDictionaryProfile>* profiles)
+{
+    LoadProfilesFromSubKey(settingsKey, kProfilesSubKey, profiles);
+    if (!profiles->empty())
+    {
+        return;
+    }
+
+    LoadProfilesFromSubKey(settingsKey, kLegacyProfilesSubKey, profiles);
+}
+
+void SaveProfiles(HKEY settingsKey, const std::vector<SumireSettingsStore::UserDictionaryProfile>& profiles)
 {
     RegDeleteTreeW(settingsKey, kProfilesSubKey);
+    RegDeleteTreeW(settingsKey, kLegacyProfilesSubKey);
 
     if (profiles.empty())
     {
@@ -282,7 +298,7 @@ Settings Load()
     {
         settings.zenzModelRepo = GetDefaultZenzModelRepo(settings.zenzModelPreset);
     }
-    LoadProfiles(key, &settings.personNameDictionaryProfiles);
+    LoadProfiles(key, &settings.userDictionaryProfiles);
 
     RegCloseKey(key);
     return settings;
@@ -321,7 +337,7 @@ bool Save(const Settings& settings)
         settings.zenzModelRepo.empty()
             ? GetDefaultZenzModelRepo(NormalizeZenzModelPreset(settings.zenzModelPreset))
             : settings.zenzModelRepo);
-    SaveProfiles(key, settings.personNameDictionaryProfiles);
+    SaveProfiles(key, settings.userDictionaryProfiles);
 
     RegCloseKey(key);
     return true;

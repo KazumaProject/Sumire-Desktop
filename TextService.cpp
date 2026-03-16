@@ -72,7 +72,7 @@ std::wstring BuildConverterSettingsSignature(const SumireSettingsStore::Settings
     AppendSignaturePart(&signature, settings.zenzModelPath);
     AppendSignaturePart(&signature, settings.zenzModelRepo);
 
-    for (const SumireSettingsStore::PersonNameDictionaryProfile& profile : settings.personNameDictionaryProfiles)
+    for (const SumireSettingsStore::UserDictionaryProfile& profile : settings.userDictionaryProfiles)
     {
         AppendSignaturePart(&signature, profile.id);
         AppendSignaturePart(&signature, profile.name);
