@@ -15,6 +15,11 @@ Sumire Desktop は Windows 向けの日本語入力 IME です。Microsoft の T
 - `SumireInstaller.exe`: 配布用インストーラー
 - `SumireUninstaller.exe`: アンインストーラー
 
+## ドキュメント
+
+- [設定 README](./docs/settings/README.md)
+- [基本操作 README](./docs/basic-usage/README.md)
+
 ## zenz モデルのインストール時ダウンロード
 
 既定設定では、モデルファイルを次の場所に配置します。

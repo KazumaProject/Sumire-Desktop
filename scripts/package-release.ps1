@@ -94,6 +94,8 @@ Copy-FileIfExists -Source (Join-Path $repoRoot "README.en.md") -Destination $bin
 Copy-FileIfExists -Source (Join-Path $repoRoot "LICENSE") -Destination $installerStage
 Copy-FileIfExists -Source (Join-Path $repoRoot "LICENSE") -Destination $binariesStage
 
+Copy-DirectoryIfExists -Source (Join-Path $repoRoot "docs") -Destination (Join-Path $installerStage "docs")
+Copy-DirectoryIfExists -Source (Join-Path $repoRoot "docs") -Destination (Join-Path $binariesStage "docs")
 Copy-DirectoryIfExists -Source (Join-Path $repoRoot "dictionaries") -Destination (Join-Path $installerStage "dictionaries")
 Copy-DirectoryIfExists -Source (Join-Path $repoRoot "dictionaries") -Destination (Join-Path $binariesStage "dictionaries")
 
