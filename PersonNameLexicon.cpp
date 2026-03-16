@@ -28,14 +28,14 @@ std::wstring Utf8ToWide(const std::string& value)
     const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
     if (required <= 0)
     {
-        throw std::runtime_error("PersonNameLexicon: invalid UTF-8 input");
+        throw std::runtime_error("UserDictionaryLexicon: invalid UTF-8 input");
     }
 
     std::wstring result(static_cast<size_t>(required), L'\0');
     const int converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), &result[0], required);
     if (converted != required)
     {
-        throw std::runtime_error("PersonNameLexicon: failed UTF-8 conversion");
+        throw std::runtime_error("UserDictionaryLexicon: failed UTF-8 conversion");
     }
 
     return result;
@@ -87,7 +87,7 @@ int ParseIntField(std::string_view field, const char* name)
     const auto parsed = std::from_chars(field.data(), field.data() + field.size(), value);
     if (parsed.ec != std::errc() || parsed.ptr != field.data() + field.size())
     {
-        throw std::runtime_error(std::string("PersonNameLexicon: invalid int field: ") + name);
+        throw std::runtime_error(std::string("UserDictionaryLexicon: invalid int field: ") + name);
     }
 
     return value;
@@ -203,7 +203,7 @@ bool LoadTextEntries(
         entry.leftId = ParseIntField(leftField, "left_id");
         entry.rightId = ParseIntField(rightField, "right_id");
         entry.wordCost = std::max(100, ParseIntField(costField, "cost") - 6000);
-        entry.dictionaryKind = DictionaryKind::PersonName;
+        entry.dictionaryKind = DictionaryKind::User;
         entry.sourceEntryId = nextEntryId++;
 
         if (entry.reading.empty() || entry.surface.empty())
@@ -274,12 +274,12 @@ bool ReadWString(std::ifstream& input, std::wstring* value)
 }
 }
 
-PersonNameLexicon::PersonNameLexicon(const std::filesystem::path& path)
+UserDictionaryLexicon::UserDictionaryLexicon(const std::filesystem::path& path)
 {
     LoadFile(path);
 }
 
-bool PersonNameLexicon::BuildBinaryFromText(
+bool UserDictionaryLexicon::BuildBinaryFromText(
     const std::filesystem::path& sourcePath,
     const std::filesystem::path& outputPath,
     std::wstring* errorMessage)
@@ -362,12 +362,12 @@ bool PersonNameLexicon::BuildBinaryFromText(
     return true;
 }
 
-DictionaryKind PersonNameLexicon::GetKind() const
+DictionaryKind UserDictionaryLexicon::GetKind() const
 {
-    return DictionaryKind::PersonName;
+    return DictionaryKind::User;
 }
 
-void PersonNameLexicon::LookupPrefix(const std::wstring& reading, size_t start, std::vector<LexiconEntry>* out) const
+void UserDictionaryLexicon::LookupPrefix(const std::wstring& reading, size_t start, std::vector<LexiconEntry>* out) const
 {
     if (out == nullptr)
     {
@@ -399,7 +399,7 @@ void PersonNameLexicon::LookupPrefix(const std::wstring& reading, size_t start, 
     }
 }
 
-void PersonNameLexicon::LookupExact(const std::wstring& reading, std::vector<LexiconEntry>* out) const
+void UserDictionaryLexicon::LookupExact(const std::wstring& reading, std::vector<LexiconEntry>* out) const
 {
     if (out == nullptr)
     {
@@ -421,17 +421,17 @@ void PersonNameLexicon::LookupExact(const std::wstring& reading, std::vector<Lex
     out->insert(out->end(), it->second.begin(), it->second.end());
 }
 
-bool PersonNameLexicon::IsLoaded() const
+bool UserDictionaryLexicon::IsLoaded() const
 {
     return _loaded;
 }
 
-const std::filesystem::path& PersonNameLexicon::GetSourcePath() const
+const std::filesystem::path& UserDictionaryLexicon::GetSourcePath() const
 {
     return _sourcePath;
 }
 
-void PersonNameLexicon::LoadFile(const std::filesystem::path& path)
+void UserDictionaryLexicon::LoadFile(const std::filesystem::path& path)
 {
     _entriesByReading.clear();
     _readingLengths.clear();
@@ -446,7 +446,7 @@ void PersonNameLexicon::LoadFile(const std::filesystem::path& path)
     std::ifstream probe(path, std::ios::binary);
     if (!probe)
     {
-        throw std::runtime_error("PersonNameLexicon: failed to open source file");
+        throw std::runtime_error("UserDictionaryLexicon: failed to open source file");
     }
 
     char magic[sizeof(kBinaryMagic)] = {};
@@ -462,7 +462,7 @@ void PersonNameLexicon::LoadFile(const std::filesystem::path& path)
     LoadTextFile(path);
 }
 
-void PersonNameLexicon::LoadTextFile(const std::filesystem::path& path)
+void UserDictionaryLexicon::LoadTextFile(const std::filesystem::path& path)
 {
     std::wstring errorMessage;
     if (!LoadTextEntries(path, &_entriesByReading, &_readingLengths, &errorMessage))
@@ -474,25 +474,25 @@ void PersonNameLexicon::LoadTextFile(const std::filesystem::path& path)
     _loaded = true;
 }
 
-void PersonNameLexicon::LoadBinaryFile(const std::filesystem::path& path)
+void UserDictionaryLexicon::LoadBinaryFile(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
     if (!input)
     {
-        throw std::runtime_error("PersonNameLexicon: failed to open source file");
+        throw std::runtime_error("UserDictionaryLexicon: failed to open source file");
     }
 
     char magic[sizeof(kBinaryMagic)] = {};
     input.read(magic, sizeof(magic));
     if (!input || std::memcmp(magic, kBinaryMagic, sizeof(kBinaryMagic)) != 0)
     {
-        throw std::runtime_error("PersonNameLexicon: invalid binary dictionary");
+        throw std::runtime_error("UserDictionaryLexicon: invalid binary dictionary");
     }
 
     std::uint32_t entryCount = 0;
     if (!ReadUInt32(input, &entryCount))
     {
-        throw std::runtime_error("PersonNameLexicon: invalid binary header");
+        throw std::runtime_error("UserDictionaryLexicon: invalid binary header");
     }
 
     for (std::uint32_t index = 0; index < entryCount; ++index)
@@ -501,7 +501,7 @@ void PersonNameLexicon::LoadBinaryFile(const std::filesystem::path& path)
         if (!ReadWString(input, &entry.reading) ||
             !ReadWString(input, &entry.surface))
         {
-            throw std::runtime_error("PersonNameLexicon: invalid binary string entry");
+            throw std::runtime_error("UserDictionaryLexicon: invalid binary string entry");
         }
 
         input.read(reinterpret_cast<char*>(&entry.leftId), sizeof(entry.leftId));
@@ -511,10 +511,10 @@ void PersonNameLexicon::LoadBinaryFile(const std::filesystem::path& path)
         input.read(reinterpret_cast<char*>(&entry.sourceEntryId), sizeof(entry.sourceEntryId));
         if (!input)
         {
-            throw std::runtime_error("PersonNameLexicon: invalid binary payload");
+            throw std::runtime_error("UserDictionaryLexicon: invalid binary payload");
         }
 
-        entry.dictionaryKind = DictionaryKind::PersonName;
+        entry.dictionaryKind = DictionaryKind::User;
         if (entry.reading.empty() || entry.surface.empty())
         {
             continue;

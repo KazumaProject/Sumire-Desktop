@@ -10,6 +10,7 @@
 #include <memory>
 #include <filesystem>
 #include <cstdlib>
+#include <future>
 #include <fstream>
 #include <cmath>
 #include <utility>
@@ -392,12 +393,12 @@ std::vector<std::filesystem::path> GetMozcDictionaryDirectories()
     return unique;
 }
 
-std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
+std::vector<std::filesystem::path> GetUserDictionaryFiles()
 {
     std::vector<std::filesystem::path> candidates;
 
     const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
-    for (const auto& profile : settings.personNameDictionaryProfiles)
+    for (const auto& profile : settings.userDictionaryProfiles)
     {
         if (!profile.enabled || profile.builtPath.empty())
         {
@@ -407,7 +408,11 @@ std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
         candidates.push_back(std::filesystem::path(profile.builtPath));
     }
 
-    const std::wstring envFile = ReadEnvVar(L"SUMIRE_PERSON_NAMES_PATH");
+    std::wstring envFile = ReadEnvVar(L"SUMIRE_USER_DICTIONARY_PATH");
+    if (envFile.empty())
+    {
+        envFile = ReadEnvVar(L"SUMIRE_PERSON_NAMES_PATH");
+    }
     if (!envFile.empty())
     {
         candidates.push_back(std::filesystem::path(envFile));
@@ -445,6 +450,19 @@ std::vector<std::filesystem::path> GetPersonNameDictionaryFiles()
     }
 
     return unique;
+}
+
+std::shared_ptr<UserDictionaryLexicon> LoadUserDictionaryAsync(const std::filesystem::path& path)
+{
+    try
+    {
+        std::shared_ptr<UserDictionaryLexicon> lexicon = std::make_shared<UserDictionaryLexicon>(path);
+        return lexicon->IsLoaded() ? lexicon : std::shared_ptr<UserDictionaryLexicon>();
+    }
+    catch (...)
+    {
+        return std::shared_ptr<UserDictionaryLexicon>();
+    }
 }
 
 std::shared_ptr<ZenzClient> BuildZenzClient(const SumireSettingsStore::Settings& settings)
@@ -636,12 +654,21 @@ KanaKanjiConverter::KanaKanjiConverter()
         }
     }
 
-    for (const std::filesystem::path& path : GetPersonNameDictionaryFiles())
+    std::vector<std::future<std::shared_ptr<UserDictionaryLexicon>>> userDictionaryFutures;
+    for (const std::filesystem::path& path : GetUserDictionaryFiles())
     {
-        std::shared_ptr<PersonNameLexicon> personLexicon = std::make_shared<PersonNameLexicon>(path);
-        if (personLexicon->IsLoaded())
+        userDictionaryFutures.push_back(std::async(std::launch::async, [path]()
         {
-            AddLexicon(personLexicon);
+            return LoadUserDictionaryAsync(path);
+        }));
+    }
+
+    for (std::future<std::shared_ptr<UserDictionaryLexicon>>& future : userDictionaryFutures)
+    {
+        std::shared_ptr<UserDictionaryLexicon> userLexicon = future.get();
+        if (userLexicon)
+        {
+            AddLexicon(userLexicon);
         }
     }
 
@@ -682,6 +709,32 @@ ConversionResult KanaKanjiConverter::Convert(
     }
 
     const bool zenzEnabled = options.useZenz && _zenzClient != nullptr && _zenzClient->IsEnabled();
+    auto drainAsyncZenz = [](std::future<std::wstring>* future)
+    {
+        if (future == nullptr || !future->valid())
+        {
+            return;
+        }
+
+        future->get();
+    };
+
+    auto buildAsyncZenzOnlyResult = [&reading](std::future<std::wstring>* future) -> ConversionResult
+    {
+        if (future == nullptr || !future->valid())
+        {
+            return ConversionResult();
+        }
+
+        const std::wstring generated = future->get();
+        if (generated.empty())
+        {
+            return ConversionResult();
+        }
+
+        return BuildZenzOnlyResult(reading, generated);
+    };
+
     if (options.zenzOnly)
     {
         if (!zenzEnabled)
@@ -702,6 +755,20 @@ ConversionResult KanaKanjiConverter::Convert(
 
     const int kInf = std::numeric_limits<int>::max() / 8;
     const size_t length = reading.size();
+    std::future<std::wstring> asyncZenz;
+    if (zenzEnabled)
+    {
+        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
+        asyncZenz = std::async(std::launch::async, [this, reading, options, timeoutMs, shouldCancel]()
+        {
+            return _zenzClient->Generate(
+                reading,
+                options.leftContext,
+                timeoutMs,
+                shouldCancel,
+                options.onZenzPartial);
+        });
+    }
 
     std::vector<LexiconEntry> entries;
     std::vector<std::vector<PathStep>> lattice(length + 1);
@@ -710,6 +777,7 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -740,6 +808,7 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -748,6 +817,7 @@ ConversionResult KanaKanjiConverter::Convert(
         {
             if (ShouldCancel(shouldCancel))
             {
+                drainAsyncZenz(&asyncZenz);
                 return ConversionResult();
             }
 
@@ -808,6 +878,7 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -832,7 +903,7 @@ ConversionResult KanaKanjiConverter::Convert(
 
     if (terminals.empty())
     {
-        return result;
+        return buildAsyncZenzOnlyResult(&asyncZenz);
     }
 
     std::sort(
@@ -848,6 +919,7 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -862,6 +934,7 @@ ConversionResult KanaKanjiConverter::Convert(
             shouldCancel);
         if (candidate.surface.empty() && candidate.bunsetsu.empty())
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
         const std::wstring signature = BuildCandidateSignature(candidate);
@@ -889,18 +962,12 @@ ConversionResult KanaKanjiConverter::Convert(
 
     if (result.candidates.empty())
     {
-        return result;
+        return buildAsyncZenzOnlyResult(&asyncZenz);
     }
 
     if (zenzEnabled)
     {
-        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
-        const std::wstring generated = _zenzClient->Generate(
-            reading,
-            options.leftContext,
-            timeoutMs,
-            shouldCancel,
-            options.onZenzPartial);
+        const std::wstring generated = asyncZenz.valid() ? asyncZenz.get() : std::wstring();
         FuseZenzCandidate(reading, generated, &result);
     }
 
@@ -909,6 +976,7 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
+            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 

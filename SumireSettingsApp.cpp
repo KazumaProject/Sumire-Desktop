@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cwctype>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -54,7 +55,7 @@ struct BuildResult
 {
     bool success = false;
     std::wstring message;
-    std::vector<SumireSettingsStore::PersonNameDictionaryProfile> profiles;
+    std::vector<SumireSettingsStore::UserDictionaryProfile> profiles;
 };
 
 struct WindowState
@@ -78,7 +79,7 @@ struct WindowState
     HWND dictionaryEnabled = nullptr;
     HWND status = nullptr;
 
-    std::vector<SumireSettingsStore::PersonNameDictionaryProfile> profiles;
+    std::vector<SumireSettingsStore::UserDictionaryProfile> profiles;
     int selectedProfileIndex = -1;
     bool buildInProgress = false;
     std::thread buildWorker;
@@ -258,10 +259,10 @@ std::filesystem::path GetDictionaryBuildDirectory()
     const std::wstring installDir = ReadInstallDirFromRegistry();
     if (!installDir.empty())
     {
-        return std::filesystem::path(installDir) / L"dictionaries" / L"names" / L"build";
+        return std::filesystem::path(installDir) / L"dictionaries" / L"user" / L"build";
     }
 
-    return GetModuleDirectory() / L"dictionaries" / L"names" / L"build";
+    return GetModuleDirectory() / L"dictionaries" / L"user" / L"build";
 }
 
 bool EqualsIgnoreCase(const std::wstring& lhs, const std::wstring& rhs)
@@ -750,7 +751,7 @@ std::wstring MakeProfileId(const std::wstring& name)
     return id;
 }
 
-std::filesystem::path GetBuildOutputPath(const SumireSettingsStore::PersonNameDictionaryProfile& profile)
+std::filesystem::path GetBuildOutputPath(const SumireSettingsStore::UserDictionaryProfile& profile)
 {
     if (!profile.builtPath.empty())
     {
@@ -760,7 +761,7 @@ std::filesystem::path GetBuildOutputPath(const SumireSettingsStore::PersonNameDi
     return GetDictionaryBuildDirectory() / (profile.id + L".bin");
 }
 
-std::wstring BuildProfileLabel(const SumireSettingsStore::PersonNameDictionaryProfile& profile)
+std::wstring BuildProfileLabel(const SumireSettingsStore::UserDictionaryProfile& profile)
 {
     std::wstring label = profile.enabled ? L"[on] " : L"[off] ";
     label += profile.name.empty() ? L"(unnamed)" : profile.name;
@@ -875,7 +876,7 @@ bool SaveSettingsToStore(HWND hwnd, bool showStatus)
     settings.zenzModelPreset = GetSelectedZenzModelPreset(hwnd);
     settings.zenzModelPath = Trim(GetWindowTextString(state->zenzModelPath));
     settings.zenzModelRepo = Trim(GetWindowTextString(state->zenzModelRepo));
-    settings.personNameDictionaryProfiles = state->profiles;
+    settings.userDictionaryProfiles = state->profiles;
 
     if (!SumireSettingsStore::Save(settings))
     {
@@ -939,7 +940,7 @@ void LoadSettingsIntoWindow(HWND hwnd)
         SetWindowTextW(state->zenzModelPath, settings.zenzModelPath.c_str());
     }
     SetWindowTextW(state->zenzModelRepo, settings.zenzModelRepo.c_str());
-    state->profiles = settings.personNameDictionaryProfiles;
+    state->profiles = settings.userDictionaryProfiles;
     state->selectedProfileIndex = state->profiles.empty() ? -1 : 0;
 
     PopulateDictionaryList(hwnd);
@@ -1022,7 +1023,7 @@ void BrowseDictionarySourceFile(HWND hwnd)
     }
 }
 
-bool CollectProfileEditors(HWND hwnd, SumireSettingsStore::PersonNameDictionaryProfile* profile, bool preserveIdentity)
+bool CollectProfileEditors(HWND hwnd, SumireSettingsStore::UserDictionaryProfile* profile, bool preserveIdentity)
 {
     WindowState* state = GetWindowState(hwnd);
     if (state == nullptr || profile == nullptr)
@@ -1081,7 +1082,7 @@ void AddOrUpdateDictionaryProfile(HWND hwnd)
         state->selectedProfileIndex >= 0 &&
         state->selectedProfileIndex < static_cast<int>(state->profiles.size());
 
-    SumireSettingsStore::PersonNameDictionaryProfile profile;
+    SumireSettingsStore::UserDictionaryProfile profile;
     if (hasSelection)
     {
         profile = state->profiles[static_cast<size_t>(state->selectedProfileIndex)];
@@ -1151,7 +1152,7 @@ void StartDictionaryBuild(HWND hwnd, bool buildAll)
         return;
     }
 
-    std::vector<SumireSettingsStore::PersonNameDictionaryProfile> targets;
+    std::vector<SumireSettingsStore::UserDictionaryProfile> targets;
     if (buildAll)
     {
         targets = state->profiles;
@@ -1199,12 +1200,29 @@ void StartDictionaryBuild(HWND hwnd, bool buildAll)
         result->success = true;
         result->profiles = targets;
 
-        std::wstring message;
-        for (auto& profile : result->profiles)
+        std::vector<std::future<std::wstring>> buildFutures;
+        buildFutures.reserve(result->profiles.size());
+        for (const auto& profile : result->profiles)
         {
-            std::wstring errorMessage;
-            if (!PersonNameLexicon::BuildBinaryFromText(profile.sourcePath, profile.builtPath, &errorMessage))
+            buildFutures.push_back(std::async(std::launch::async, [profile]()
             {
+                std::wstring errorMessage;
+                if (!UserDictionaryLexicon::BuildBinaryFromText(profile.sourcePath, profile.builtPath, &errorMessage))
+                {
+                    return errorMessage.empty() ? std::wstring(L"build failed") : errorMessage;
+                }
+
+                return std::wstring();
+            }));
+        }
+
+        std::wstring message;
+        for (size_t index = 0; index < result->profiles.size(); ++index)
+        {
+            const std::wstring errorMessage = buildFutures[index].get();
+            if (!errorMessage.empty())
+            {
+                const auto& profile = result->profiles[index];
                 result->success = false;
                 if (!message.empty())
                 {
@@ -1213,7 +1231,7 @@ void StartDictionaryBuild(HWND hwnd, bool buildAll)
 
                 message += profile.name;
                 message += L": ";
-                message += errorMessage.empty()
+                message += errorMessage == L"build failed"
                     ? UiText(uiLanguage, L"ビルド失敗", L"build failed")
                     : errorMessage;
             }
@@ -1558,7 +1576,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
             CreateWindowW(
                 L"STATIC",
-                UiText(state->uiLanguage, L"人名辞書ビルド", L"Person name dictionary builds"),
+                UiText(state->uiLanguage, L"ユーザー辞書ビルド", L"User dictionary builds"),
                 WS_CHILD | WS_VISIBLE,
                 16,
                 352,

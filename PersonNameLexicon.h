@@ -7,10 +7,10 @@
 
 #include "ILexicon.h"
 
-class PersonNameLexicon : public ILexicon
+class UserDictionaryLexicon : public ILexicon
 {
 public:
-    explicit PersonNameLexicon(const std::filesystem::path& path);
+    explicit UserDictionaryLexicon(const std::filesystem::path& path);
     static bool BuildBinaryFromText(
         const std::filesystem::path& sourcePath,
         const std::filesystem::path& outputPath,
@@ -33,3 +33,5 @@ private:
     std::filesystem::path _sourcePath;
     bool _loaded = false;
 };
+
+using PersonNameLexicon = UserDictionaryLexicon;

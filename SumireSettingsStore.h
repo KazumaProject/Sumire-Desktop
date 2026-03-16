@@ -8,7 +8,7 @@
 
 namespace SumireSettingsStore
 {
-struct PersonNameDictionaryProfile
+struct UserDictionaryProfile
 {
     std::wstring id;
     std::wstring name;
@@ -29,7 +29,7 @@ struct Settings
     std::wstring zenzModelPreset = L"small";
     std::wstring zenzModelPath;
     std::wstring zenzModelRepo = L"https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf";
-    std::vector<PersonNameDictionaryProfile> personNameDictionaryProfiles;
+    std::vector<UserDictionaryProfile> userDictionaryProfiles;
 };
 
 Settings Load();
