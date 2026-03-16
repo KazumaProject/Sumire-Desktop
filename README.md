@@ -8,8 +8,8 @@ Sumire Desktop is a Windows Japanese IME project based on Microsoft's `UILess Mo
 Current highlights:
 
 - The installer can optionally download the default `zenz` GGUF model during installation.
-- GitHub Actions can build release assets and upload them when a tag is pushed.
-- Release packages are generated as zip bundles so the installer has the payload files it requires.
+- GitHub Actions can build a self-contained `Setup.exe` and upload it when a tag is pushed.
+- The installer can optionally create a desktop shortcut for `Sumire Settings`.
 
 License:
 

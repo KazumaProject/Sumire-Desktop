@@ -15,6 +15,11 @@ Sumire Desktop は Windows 向けの日本語入力 IME です。Microsoft の T
 - `SumireInstaller.exe`: 配布用インストーラー
 - `SumireUninstaller.exe`: アンインストーラー
 
+## ドキュメント
+
+- [設定 README](./docs/settings/README.md)
+- [基本操作 README](./docs/basic-usage/README.md)
+
 ## zenz モデルのインストール時ダウンロード
 
 既定設定では、モデルファイルを次の場所に配置します。
@@ -31,13 +36,14 @@ Sumire Desktop は Windows 向けの日本語入力 IME です。Microsoft の T
 
 ## 配布物
 
-GitHub Releases には次の zip をアップロードする想定です。
+GitHub Releases には自己完結した `*-Setup.exe` をアップロードする想定です。
 
-- `*-installer.zip`: `SumireInstaller.exe` とインストールに必要な同梱ファイル一式
-- `*-binaries.zip`: 実行ファイル群と辞書ファイル一式
+- `*-Setup.exe`: インストーラー本体に IME の実行ファイル群と辞書を内包した単体セットアップ
 
-注意:
-`SumireInstaller.exe` は単体配布を前提にしていません。インストーラーは近くにある DLL、設定アプリ、辞書などを参照して配置するため、release では zip ごと配布してください。
+セットアップ時には次を選べます。
+
+- 既定の `zenz` モデルをインストール中にダウンロードするか
+- `Sumire Settings` のデスクトップショートカットを作成するか
 
 ## ローカルビルド
 
@@ -62,8 +68,8 @@ msbuild Sumire.sln /m /p:Configuration=Release /p:Platform=x64
 `.github/workflows/release.yml` は tag push を契機に次を実行します。
 
 1. `Sumire.sln` を `Release|x64` でビルド
-2. `scripts/package-release.ps1` で配布 zip を生成
-3. GitHub Release を作成または更新し、zip を asset としてアップロード
+2. `scripts/package-release.ps1` で `Setup.exe` を生成
+3. GitHub Release を作成または更新し、`Setup.exe` を asset としてアップロード
 
 ## ベース
 

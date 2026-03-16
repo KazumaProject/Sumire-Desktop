@@ -33,11 +33,9 @@ The settings UI lets you override both the model path and the model repo. The re
 
 GitHub Releases are expected to publish:
 
-- `*-installer.zip`: `SumireInstaller.exe` plus the files it needs beside it
-- `*-binaries.zip`: runtime executables and dictionary files
+- `*-Setup.exe`: a self-contained installer with the runtime executables and dictionaries embedded
 
-Note:
-`SumireInstaller.exe` is not a self-contained bootstrapper. It copies adjacent payload files during installation, so releases should distribute the zip bundle rather than the installer executable alone.
+During setup, users can choose whether to download the default `zenz` model and whether to create a desktop shortcut for `Sumire Settings`.
 
 ## Building locally
 
@@ -62,8 +60,8 @@ Build outputs are typically placed in `x64\Release\`.
 `.github/workflows/release.yml` runs on tag pushes and does the following:
 
 1. Builds `Sumire.sln` in `Release|x64`
-2. Generates distributable zip files with `scripts/package-release.ps1`
-3. Creates or updates a GitHub Release and uploads the zip assets
+2. Generates a distributable `Setup.exe` with `scripts/package-release.ps1`
+3. Creates or updates a GitHub Release and uploads the installer asset
 
 ## Base sample
 

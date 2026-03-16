@@ -20,6 +20,7 @@ namespace
 constexpr wchar_t kWindowClassName[] = L"SumireSettingsWindow";
 constexpr UINT WM_SUMIRE_BUILD_FINISHED = WM_APP + 0x230;
 constexpr wchar_t kZenzServiceProcessName[] = L"SumireZenzService.exe";
+constexpr wchar_t kUninstallerProcessName[] = L"SumireUninstaller.exe";
 
 enum ControlId
 {
@@ -46,6 +47,7 @@ enum ControlId
     IdButtonBuildAll = 121,
     IdComboSettingsLanguage = 122,
     IdCheckLiveConversionSourceView = 123,
+    IdButtonUninstall = 124,
 };
 
 struct BuildResult
@@ -81,6 +83,8 @@ struct WindowState
     bool buildInProgress = false;
     std::thread buildWorker;
 };
+
+bool LaunchExecutable(const std::filesystem::path& executablePath, DWORD creationFlags);
 
 HMENU ControlMenu(int id)
 {
@@ -265,7 +269,7 @@ bool EqualsIgnoreCase(const std::wstring& lhs, const std::wstring& rhs)
     return CompareStringOrdinal(lhs.c_str(), -1, rhs.c_str(), -1, TRUE) == CSTR_EQUAL;
 }
 
-std::filesystem::path GetZenzServiceExecutablePath()
+std::filesystem::path GetInstalledExecutablePath(const wchar_t* fileName)
 {
     std::filesystem::path root = GetModuleDirectory();
     const std::wstring installDir = ReadInstallDirFromRegistry();
@@ -274,7 +278,7 @@ std::filesystem::path GetZenzServiceExecutablePath()
         root = std::filesystem::path(installDir);
     }
 
-    const std::filesystem::path candidate = root / kZenzServiceProcessName;
+    const std::filesystem::path candidate = root / fileName;
     std::error_code ec;
     if (std::filesystem::exists(candidate, ec) && !ec)
     {
@@ -282,6 +286,16 @@ std::filesystem::path GetZenzServiceExecutablePath()
     }
 
     return std::filesystem::path();
+}
+
+std::filesystem::path GetZenzServiceExecutablePath()
+{
+    return GetInstalledExecutablePath(kZenzServiceProcessName);
+}
+
+std::filesystem::path GetUninstallerExecutablePath()
+{
+    return GetInstalledExecutablePath(kUninstallerProcessName);
 }
 
 std::vector<DWORD> GetZenzServiceProcessIds()
@@ -355,11 +369,28 @@ bool StartZenzServiceProcess()
         return false;
     }
 
+    return LaunchExecutable(servicePath, CREATE_NO_WINDOW);
+}
+
+bool PersistZenzServiceEnabledSetting(bool enabled)
+{
+    SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    settings.zenzServiceEnabled = enabled;
+    return SumireSettingsStore::Save(settings);
+}
+
+bool LaunchExecutable(const std::filesystem::path& executablePath, DWORD creationFlags)
+{
+    if (executablePath.empty())
+    {
+        return false;
+    }
+
     STARTUPINFOW startupInfo = {};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo = {};
     std::wstring commandLine = L"\"";
-    commandLine += servicePath.wstring();
+    commandLine += executablePath.wstring();
     commandLine += L"\"";
 
     if (!CreateProcessW(
@@ -368,9 +399,9 @@ bool StartZenzServiceProcess()
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW,
+            creationFlags,
             nullptr,
-            servicePath.parent_path().c_str(),
+            executablePath.parent_path().c_str(),
             &startupInfo,
             &processInfo))
     {
@@ -382,11 +413,62 @@ bool StartZenzServiceProcess()
     return true;
 }
 
-bool PersistZenzServiceEnabledSetting(bool enabled)
+void LaunchUninstaller(HWND hwnd)
 {
-    SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
-    settings.zenzServiceEnabled = enabled;
-    return SumireSettingsStore::Save(settings);
+    WindowState* state = GetWindowState(hwnd);
+    if (state != nullptr && state->buildInProgress)
+    {
+        MessageBoxW(
+            hwnd,
+            UiText(
+                GetCurrentUiLanguage(hwnd),
+                L"辞書ビルド中はアンインストールできません。完了してから再実行してください。",
+                L"Uninstall is unavailable while a dictionary build is running. Wait for it to finish first."),
+            UiText(GetCurrentUiLanguage(hwnd), L"Sumire 設定", L"Sumire Settings"),
+            MB_ICONINFORMATION | MB_OK);
+        return;
+    }
+
+    if (MessageBoxW(
+            hwnd,
+            UiText(
+                GetCurrentUiLanguage(hwnd),
+                L"Sumire IME をアンインストールします。設定画面は閉じます。続行しますか？",
+                L"Start uninstalling Sumire IME? Settings will close first."),
+            UiText(GetCurrentUiLanguage(hwnd), L"Sumire 設定", L"Sumire Settings"),
+            MB_ICONQUESTION | MB_OKCANCEL) != IDOK)
+    {
+        return;
+    }
+
+    const std::filesystem::path uninstallerPath = GetUninstallerExecutablePath();
+    if (uninstallerPath.empty())
+    {
+        MessageBoxW(
+            hwnd,
+            UiText(
+                GetCurrentUiLanguage(hwnd),
+                L"アンインストーラーが見つかりませんでした。再インストール後に再度お試しください。",
+                L"The uninstaller was not found. Reinstall Sumire and try again."),
+            UiText(GetCurrentUiLanguage(hwnd), L"Sumire 設定", L"Sumire Settings"),
+            MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    if (!LaunchExecutable(uninstallerPath, 0))
+    {
+        MessageBoxW(
+            hwnd,
+            UiText(
+                GetCurrentUiLanguage(hwnd),
+                L"アンインストーラーを起動できませんでした。",
+                L"Failed to launch the uninstaller."),
+            UiText(GetCurrentUiLanguage(hwnd), L"Sumire 設定", L"Sumire Settings"),
+            MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    DestroyWindow(hwnd);
 }
 
 std::wstring GetDefaultZenzModelRepoForPreset(const std::wstring& preset)
@@ -757,6 +839,7 @@ void UpdateButtons(HWND hwnd)
     EnableWindow(GetDlgItem(hwnd, IdButtonRemoveDictionary), hasSelection && !state->buildInProgress);
     EnableWindow(GetDlgItem(hwnd, IdButtonBuildSelected), hasSelection && !state->buildInProgress);
     EnableWindow(GetDlgItem(hwnd, IdButtonBuildAll), canBuildAll);
+    EnableWindow(GetDlgItem(hwnd, IdButtonUninstall), !state->buildInProgress);
     EnableWindow(GetDlgItem(hwnd, IdButtonClose), !state->buildInProgress);
 }
 
@@ -1622,6 +1705,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 nullptr,
                 nullptr);
 
+            CreateWindowW(
+                L"BUTTON",
+                UiText(state->uiLanguage, L"アンインストール...", L"Uninstall..."),
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                16,
+                644,
+                120,
+                28,
+                hwnd,
+                ControlMenu(IdButtonUninstall),
+                nullptr,
+                nullptr);
+
             state->status = CreateWindowW(
                 L"STATIC",
                 L"",
@@ -1690,6 +1786,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             return 0;
         case IdButtonSave:
             SaveSettingsToStore(hwnd, true);
+            return 0;
+        case IdButtonUninstall:
+            LaunchUninstaller(hwnd);
             return 0;
         case IdButtonClose:
             if (!GetWindowState(hwnd)->buildInProgress)

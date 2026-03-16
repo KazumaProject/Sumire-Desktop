@@ -52,6 +52,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     SumireInstallUtil::RemoveShortcut(SumireInstallUtil::GetStartMenuShortcutPath(L"Sumire Settings.lnk"));
     SumireInstallUtil::RemoveShortcut(SumireInstallUtil::GetStartMenuShortcutPath(L"Uninstall Sumire IME.lnk"));
+    SumireInstallUtil::RemoveShortcut(SumireInstallUtil::GetDesktopShortcutPath(L"Sumire Settings.lnk"));
     SumireInstallUtil::RemoveInstallMetadata();
 
     if (settingsChoice == IDYES)

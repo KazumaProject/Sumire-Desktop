@@ -12,6 +12,8 @@ std::filesystem::path GetExecutablePath();
 std::filesystem::path GetExecutableDirectory();
 std::filesystem::path GetDefaultInstallDirectory();
 std::filesystem::path GetInstallDirectoryFromRegistry();
+std::filesystem::path GetDesktopDirectory();
+std::filesystem::path GetDesktopShortcutPath(const wchar_t* fileName);
 std::filesystem::path GetStartMenuDirectory();
 std::filesystem::path GetStartMenuShortcutPath(const wchar_t* fileName);
 
