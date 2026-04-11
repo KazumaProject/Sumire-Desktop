@@ -118,6 +118,7 @@ public:
     HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam, LPARAM lParam);
     HRESULT _HandleShiftKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
+    HRESULT _HandleShiftArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext);

@@ -277,6 +277,72 @@ HRESULT CTextService::_HandleShiftKey(TfEditCookie ec, ITfContext* pContext)
     return S_FALSE;
 }
 
+HRESULT CTextService::_HandleShiftArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam)
+{
+    _pendingAlphabeticShift = FALSE;
+    if (!_IsComposing() || _pComposition == NULL)
+    {
+        return S_FALSE;
+    }
+
+    const bool adjustLeft = (wParam == VK_LEFT);
+    const CompositionPhase phase = _compositionState.GetPhase();
+    if (phase == CompositionPhase::RechunkSelecting)
+    {
+        bool moved = adjustLeft
+            ? _compositionState.MoveFocusLeft()
+            : _compositionState.MoveFocusRight();
+        _compositionPhase = _compositionState.GetPhase();
+        if (!moved)
+        {
+            return S_OK;
+        }
+
+        return _UpdateCompositionText(ec, pContext);
+    }
+
+    bool needsRefresh = false;
+    bool shouldShowCandidateList = false;
+    if (phase == CompositionPhase::Converting)
+    {
+        if (!_compositionState.BeginSegmentSelection())
+        {
+            return S_OK;
+        }
+
+        needsRefresh = true;
+        shouldShowCandidateList = true;
+    }
+    else if (phase != CompositionPhase::CandidateSelecting)
+    {
+        return S_FALSE;
+    }
+
+    if (_compositionState.AdjustFocusedSegmentBoundary(adjustLeft, _romajiConverter))
+    {
+        needsRefresh = true;
+    }
+
+    if (!needsRefresh)
+    {
+        return S_OK;
+    }
+
+    _compositionPhase = _compositionState.GetPhase();
+    HRESULT hr = _UpdateCompositionText(ec, pContext);
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    if (shouldShowCandidateList)
+    {
+        return _ShowCandidateList(ec, pContext);
+    }
+
+    return S_OK;
+}
+
 //+---------------------------------------------------------------------------
 //
 // _HandleReturnKey
@@ -428,6 +494,14 @@ HRESULT CTextService::_HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPA
     }
 
     CompositionPhase phase = _compositionState.GetPhase();
+    if (IsShiftKeyDown() &&
+        (phase == CompositionPhase::Converting ||
+            phase == CompositionPhase::CandidateSelecting ||
+            phase == CompositionPhase::RechunkSelecting))
+    {
+        return _HandleShiftArrowKey(ec, pContext, wParam);
+    }
+
     if (phase == CompositionPhase::CandidateSelecting ||
         phase == CompositionPhase::RechunkSelecting)
     {
