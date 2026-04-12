@@ -556,7 +556,9 @@ bool CompositionState::StartConversion(
     const KanaKanjiConverter& kanaKanjiConverter,
     InputMode mode,
     const RomajiKanaConverter& converter,
-    const std::wstring& leftContext)
+    const std::wstring& leftContext,
+    bool liveConversionEnabled,
+    const std::vector<ConversionCandidate>& preferredCandidates)
 {
     if (_rawInput.empty())
     {
@@ -625,9 +627,23 @@ bool CompositionState::StartConversion(
         return true;
     }
 
-    KanaKanjiConverter::ConvertOptions convertOptions;
-    convertOptions.leftContext = leftContext;
-    const ConversionResult result = kanaKanjiConverter.Convert(_reading, convertOptions);
+    ConversionResult result;
+    if (!preferredCandidates.empty())
+    {
+        result.candidates = preferredCandidates;
+    }
+    else if (HasLiveConversionPreviewForCurrentReading())
+    {
+        result.candidates = _liveConversionCandidates;
+    }
+    else
+    {
+        KanaKanjiConverter::ConvertOptions convertOptions;
+        convertOptions.useZenz = !liveConversionEnabled;
+        convertOptions.leftContext = leftContext;
+        result = kanaKanjiConverter.Convert(_reading, convertOptions);
+    }
+
     if (result.candidates.empty())
     {
         return false;

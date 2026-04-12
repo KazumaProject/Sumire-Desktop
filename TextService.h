@@ -276,6 +276,7 @@ private:
     std::condition_variable _liveConversionCv;
     bool _liveConversionWorkerRunning;
     bool _liveConversionHasPendingRequest;
+    int _liveConversionActiveJobs;
     std::wstring _liveConversionPendingReading;
     std::wstring _liveConversionPendingLeftContext;
     std::wstring _liveConversionLatestRequestedReading;
@@ -287,6 +288,11 @@ private:
     std::uint64_t _liveConversionLatestRequestedVersion;
     std::uint64_t _liveConversionCompletedVersion;
     bool _liveConversionCompletedIsFinal;
+    std::wstring _liveZenzCandidateReading;
+    std::wstring _liveZenzCandidateLeftContext;
+    std::wstring _liveZenzCandidateSurface;
+    std::uint64_t _liveZenzCandidateVersion;
+    bool _liveZenzCandidateHasFinal;
     std::wstring _liveConversionSourceViewText;
     bool _liveConversionSourceViewBusy;
     std::wstring _converterSettingsSignature;

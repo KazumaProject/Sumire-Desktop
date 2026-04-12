@@ -445,7 +445,41 @@ HRESULT CTextService::_HandleSpaceKey(TfEditCookie ec, ITfContext* pContext)
         }
     }
 
-    if (!_compositionState.StartConversion(_kanaKanjiConverter, _GetCompositionInputMode(), _romajiConverter, leftContext))
+    std::vector<ConversionCandidate> liveZenzCandidates;
+    {
+        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+        if (_liveConversionEnabled != FALSE &&
+            _liveZenzCandidateHasFinal &&
+            _liveZenzCandidateReading == _compositionState.GetReading() &&
+            _liveZenzCandidateLeftContext == leftContext &&
+            !_liveZenzCandidateSurface.empty())
+        {
+            ConversionCandidate candidate;
+            candidate.reading = _liveZenzCandidateReading;
+            candidate.surface = _liveZenzCandidateSurface;
+
+            BunsetsuConversion bunsetsu;
+            bunsetsu.start = 0;
+            bunsetsu.length = static_cast<int>(_liveZenzCandidateReading.size());
+            bunsetsu.reading = _liveZenzCandidateReading;
+            bunsetsu.surface = _liveZenzCandidateSurface;
+            bunsetsu.alternatives.push_back(_liveZenzCandidateSurface);
+            if (_liveZenzCandidateSurface != _liveZenzCandidateReading)
+            {
+                bunsetsu.alternatives.push_back(_liveZenzCandidateReading);
+            }
+            candidate.bunsetsu.push_back(std::move(bunsetsu));
+            liveZenzCandidates.push_back(std::move(candidate));
+        }
+    }
+
+    if (!_compositionState.StartConversion(
+            _kanaKanjiConverter,
+            _GetCompositionInputMode(),
+            _romajiConverter,
+            leftContext,
+            _liveConversionEnabled != FALSE,
+            liveZenzCandidates))
     {
         return S_OK;
     }

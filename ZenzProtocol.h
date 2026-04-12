@@ -19,7 +19,6 @@ enum class Status : std::uint32_t
     Ok = 0,
     Disabled = 1,
     Error = 2,
-    Partial = 3,
 };
 
 #pragma pack(push, 1)

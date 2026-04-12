@@ -126,7 +126,9 @@ public:
         const KanaKanjiConverter& kanaKanjiConverter,
         InputMode mode,
         const RomajiKanaConverter& converter,
-        const std::wstring& leftContext = std::wstring());
+        const std::wstring& leftContext = std::wstring(),
+        bool liveConversionEnabled = false,
+        const std::vector<ConversionCandidate>& preferredCandidates = std::vector<ConversionCandidate>());
     void EnterCandidateSelecting();
     bool BeginSegmentSelection();
     bool BeginRechunkSelection(const RomajiKanaConverter& converter);

@@ -129,8 +129,7 @@ std::wstring ZenzClient::Generate(
     const std::wstring& reading,
     const std::wstring& leftContext,
     DWORD timeoutMs,
-    const std::function<bool()>& shouldCancel,
-    const std::function<void(const std::wstring&)>& onPartial) const
+    const std::function<bool()>& shouldCancel) const
 {
     const std::wstring modelPath = ResolveModelPath();
     if (!_config.enabled || !IsServiceEnabledInSettings() || reading.empty() || modelPath.empty())
@@ -209,16 +208,6 @@ std::wstring ZenzClient::Generate(
             {
                 ok = false;
                 break;
-            }
-
-            if (response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Partial))
-            {
-                generated = std::move(chunk);
-                if (onPartial)
-                {
-                    onPartial(generated);
-                }
-                continue;
             }
 
             ok = response.status == static_cast<std::uint32_t>(ZenzProtocol::Status::Ok);

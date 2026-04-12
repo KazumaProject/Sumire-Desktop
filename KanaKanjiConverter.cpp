@@ -709,31 +709,6 @@ ConversionResult KanaKanjiConverter::Convert(
     }
 
     const bool zenzEnabled = options.useZenz && _zenzClient != nullptr && _zenzClient->IsEnabled();
-    auto drainAsyncZenz = [](std::future<std::wstring>* future)
-    {
-        if (future == nullptr || !future->valid())
-        {
-            return;
-        }
-
-        future->get();
-    };
-
-    auto buildAsyncZenzOnlyResult = [&reading](std::future<std::wstring>* future) -> ConversionResult
-    {
-        if (future == nullptr || !future->valid())
-        {
-            return ConversionResult();
-        }
-
-        const std::wstring generated = future->get();
-        if (generated.empty())
-        {
-            return ConversionResult();
-        }
-
-        return BuildZenzOnlyResult(reading, generated);
-    };
 
     if (options.zenzOnly)
     {
@@ -749,26 +724,11 @@ ConversionResult KanaKanjiConverter::Convert(
                 reading,
                 options.leftContext,
                 timeoutMs,
-                shouldCancel,
-                options.onZenzPartial));
+                shouldCancel));
     }
 
     const int kInf = std::numeric_limits<int>::max() / 8;
     const size_t length = reading.size();
-    std::future<std::wstring> asyncZenz;
-    if (zenzEnabled)
-    {
-        const DWORD timeoutMs = static_cast<bool>(shouldCancel) ? 250u : 1200u;
-        asyncZenz = std::async(std::launch::async, [this, reading, options, timeoutMs, shouldCancel]()
-        {
-            return _zenzClient->Generate(
-                reading,
-                options.leftContext,
-                timeoutMs,
-                shouldCancel,
-                options.onZenzPartial);
-        });
-    }
 
     std::vector<LexiconEntry> entries;
     std::vector<std::vector<PathStep>> lattice(length + 1);
@@ -777,7 +737,6 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -808,7 +767,6 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -817,7 +775,6 @@ ConversionResult KanaKanjiConverter::Convert(
         {
             if (ShouldCancel(shouldCancel))
             {
-                drainAsyncZenz(&asyncZenz);
                 return ConversionResult();
             }
 
@@ -878,7 +835,6 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -903,7 +859,7 @@ ConversionResult KanaKanjiConverter::Convert(
 
     if (terminals.empty())
     {
-        return buildAsyncZenzOnlyResult(&asyncZenz);
+        return result;
     }
 
     std::sort(
@@ -919,7 +875,6 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 
@@ -934,7 +889,6 @@ ConversionResult KanaKanjiConverter::Convert(
             shouldCancel);
         if (candidate.surface.empty() && candidate.bunsetsu.empty())
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
         const std::wstring signature = BuildCandidateSignature(candidate);
@@ -962,13 +916,7 @@ ConversionResult KanaKanjiConverter::Convert(
 
     if (result.candidates.empty())
     {
-        return buildAsyncZenzOnlyResult(&asyncZenz);
-    }
-
-    if (zenzEnabled)
-    {
-        const std::wstring generated = asyncZenz.valid() ? asyncZenz.get() : std::wstring();
-        FuseZenzCandidate(reading, generated, &result);
+        return result;
     }
 
     const ConversionCandidate& bestCandidate = result.candidates[0];
@@ -976,7 +924,6 @@ ConversionResult KanaKanjiConverter::Convert(
     {
         if (ShouldCancel(shouldCancel))
         {
-            drainAsyncZenz(&asyncZenz);
             return ConversionResult();
         }
 

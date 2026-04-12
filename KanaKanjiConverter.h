@@ -20,7 +20,6 @@ public:
         bool useZenz = true;
         bool zenzOnly = false;
         std::wstring leftContext;
-        std::function<void(const std::wstring&)> onZenzPartial;
     };
 
     KanaKanjiConverter();
