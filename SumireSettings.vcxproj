@@ -135,6 +135,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="KeymapStore.cpp" />
     <ClCompile Include="PersonNameLexicon.cpp" />
     <ClCompile Include="SumireSettingsApp.cpp" />
     <ClCompile Include="SumireSettingsStore.cpp" />
@@ -142,6 +143,7 @@
   <ItemGroup>
     <ClInclude Include="ConversionTypes.h" />
     <ClInclude Include="ILexicon.h" />
+    <ClInclude Include="KeymapStore.h" />
     <ClInclude Include="PersonNameLexicon.h" />
     <ClInclude Include="SumireSettingsStore.h" />
   </ItemGroup>

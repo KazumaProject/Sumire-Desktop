@@ -175,6 +175,7 @@ foreach ($file in $payloadFiles) {
 }
 
 Copy-FileIfExists -Source (Join-Path $repoRoot "romaji-hiragana.tsv") -Destination $payloadStage
+Copy-DirectoryIfExists -Source (Join-Path $repoRoot "keymaps") -Destination (Join-Path $payloadStage "keymaps")
 Copy-DirectoryIfExists -Source (Join-Path $repoRoot "dictionaries") -Destination (Join-Path $payloadStage "dictionaries")
 Copy-FileIfExists -Source (Join-Path $buildDir "SumireInstaller.exe") -Destination $setupExe
 Write-EmbeddedPayload -SetupPath $setupExe -PayloadRoot $payloadStage

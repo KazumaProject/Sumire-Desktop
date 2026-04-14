@@ -1247,6 +1247,7 @@ void CTextService::_PaintLiveConversionSourceView(HDC hdc, const RECT& bounds) c
 void CTextService::_ReloadSettings()
 {
     const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    SumireKeymap::LoadRuntimeKeymap(&_keymap, nullptr);
     _liveConversionEnabled = settings.liveConversionEnabled ? TRUE : FALSE;
     _liveConversionSourceViewEnabled = settings.liveConversionSourceViewEnabled ? TRUE : FALSE;
     if (_liveConversionSourceViewEnabled == FALSE)

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "PersonNameLexicon.h"
+#include "KeymapStore.h"
 #include "SumireSettingsStore.h"
 
 namespace
@@ -49,6 +50,7 @@ enum ControlId
     IdComboSettingsLanguage = 122,
     IdCheckLiveConversionSourceView = 123,
     IdButtonUninstall = 124,
+    IdButtonKeymap = 125,
 };
 
 struct BuildResult
@@ -470,6 +472,608 @@ void LaunchUninstaller(HWND hwnd)
     }
 
     DestroyWindow(hwnd);
+}
+
+enum KeymapEditorControlId
+{
+    IdKeymapProfile = 301,
+    IdKeymapList = 302,
+    IdKeymapStatus = 303,
+    IdKeymapKey = 304,
+    IdKeymapCommand = 305,
+    IdKeymapEnabled = 306,
+    IdKeymapAdd = 307,
+    IdKeymapUpdate = 308,
+    IdKeymapRemove = 309,
+    IdKeymapSave = 310,
+    IdKeymapImportTsv = 311,
+    IdKeymapExportTsv = 312,
+    IdKeymapBackup = 313,
+    IdKeymapOpenJson = 314,
+    IdKeymapClose = 315,
+};
+
+struct KeymapEditorState
+{
+    SumireKeymap::Database database;
+    HWND profileCombo = nullptr;
+    HWND bindingList = nullptr;
+    HWND statusEdit = nullptr;
+    HWND keyEdit = nullptr;
+    HWND commandEdit = nullptr;
+    HWND enabledCheck = nullptr;
+    HWND message = nullptr;
+    int selectedProfileIndex = -1;
+    int selectedBindingIndex = -1;
+    bool closeRequested = false;
+};
+
+KeymapEditorState* GetKeymapEditorState(HWND hwnd)
+{
+    return reinterpret_cast<KeymapEditorState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+}
+
+SumireKeymap::Profile* GetSelectedKeymapProfile(KeymapEditorState* state)
+{
+    if (state == nullptr ||
+        state->selectedProfileIndex < 0 ||
+        state->selectedProfileIndex >= static_cast<int>(state->database.profiles.size()))
+    {
+        return nullptr;
+    }
+
+    return &state->database.profiles[static_cast<size_t>(state->selectedProfileIndex)];
+}
+
+void SetKeymapEditorMessage(HWND hwnd, const std::wstring& text)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state != nullptr && state->message != nullptr)
+    {
+        SetWindowTextW(state->message, text.c_str());
+    }
+}
+
+std::wstring BuildBindingListText(const SumireKeymap::Binding& binding)
+{
+    std::wstring text = binding.enabled ? L"[on] " : L"[off] ";
+    text += binding.status;
+    text += L"    ";
+    text += binding.key;
+    text += L"    ";
+    text += binding.command;
+    if (!SumireKeymap::IsSupportedCommand(binding.command))
+    {
+        text += L"    (unsupported)";
+    }
+    return text;
+}
+
+void PopulateKeymapBindingList(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    SendMessageW(state->bindingList, LB_RESETCONTENT, 0, 0);
+    SumireKeymap::Profile* profile = GetSelectedKeymapProfile(state);
+    if (profile == nullptr)
+    {
+        return;
+    }
+
+    for (const auto& binding : profile->bindings)
+    {
+        const std::wstring text = BuildBindingListText(binding);
+        SendMessageW(state->bindingList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text.c_str()));
+    }
+}
+
+void PopulateKeymapProfiles(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    SendMessageW(state->profileCombo, CB_RESETCONTENT, 0, 0);
+    state->selectedProfileIndex = -1;
+    for (size_t i = 0; i < state->database.profiles.size(); ++i)
+    {
+        const auto& profile = state->database.profiles[i];
+        std::wstring text = profile.name + L" (" + profile.id + L")";
+        SendMessageW(state->profileCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text.c_str()));
+        if (profile.id == state->database.activeProfileId)
+        {
+            state->selectedProfileIndex = static_cast<int>(i);
+        }
+    }
+
+    if (state->selectedProfileIndex < 0 && !state->database.profiles.empty())
+    {
+        state->selectedProfileIndex = 0;
+        state->database.activeProfileId = state->database.profiles.front().id;
+    }
+
+    if (state->selectedProfileIndex >= 0)
+    {
+        SendMessageW(state->profileCombo, CB_SETCURSEL, state->selectedProfileIndex, 0);
+    }
+    PopulateKeymapBindingList(hwnd);
+}
+
+void ClearKeymapBindingEditors(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    state->selectedBindingIndex = -1;
+    SendMessageW(state->bindingList, LB_SETCURSEL, static_cast<WPARAM>(-1), 0);
+    SetWindowTextW(state->statusEdit, L"Composition");
+    SetWindowTextW(state->keyEdit, L"Ctrl a");
+    SetWindowTextW(state->commandEdit, L"MoveCursorToBeginning");
+    SetCheckBoxState(state->enabledCheck, true);
+}
+
+void LoadSelectedKeymapBinding(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    SumireKeymap::Profile* profile = GetSelectedKeymapProfile(state);
+    if (state == nullptr || profile == nullptr)
+    {
+        return;
+    }
+
+    const int index = static_cast<int>(SendMessageW(state->bindingList, LB_GETCURSEL, 0, 0));
+    state->selectedBindingIndex = index;
+    if (index < 0 || index >= static_cast<int>(profile->bindings.size()))
+    {
+        ClearKeymapBindingEditors(hwnd);
+        return;
+    }
+
+    const auto& binding = profile->bindings[static_cast<size_t>(index)];
+    SetWindowTextW(state->statusEdit, binding.status.c_str());
+    SetWindowTextW(state->keyEdit, binding.key.c_str());
+    SetWindowTextW(state->commandEdit, binding.command.c_str());
+    SetCheckBoxState(state->enabledCheck, binding.enabled);
+}
+
+bool HasDuplicateKeymapBinding(const SumireKeymap::Profile& profile, const SumireKeymap::Binding& candidate, int exceptIndex)
+{
+    const std::wstring key = SumireKeymap::NormalizeKeyText(candidate.key);
+    for (size_t i = 0; i < profile.bindings.size(); ++i)
+    {
+        if (static_cast<int>(i) == exceptIndex)
+        {
+            continue;
+        }
+        const auto& existing = profile.bindings[i];
+        if (existing.status == candidate.status && SumireKeymap::NormalizeKeyText(existing.key) == key)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SaveKeymapBindingFromEditors(HWND hwnd, bool append)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    SumireKeymap::Profile* profile = GetSelectedKeymapProfile(state);
+    if (state == nullptr || profile == nullptr)
+    {
+        return false;
+    }
+
+    SumireKeymap::Binding binding;
+    binding.status = Trim(GetWindowTextString(state->statusEdit));
+    binding.key = SumireKeymap::NormalizeKeyText(Trim(GetWindowTextString(state->keyEdit)));
+    binding.command = Trim(GetWindowTextString(state->commandEdit));
+    binding.enabled = GetCheckBoxState(state->enabledCheck);
+
+    if (binding.status.empty() || binding.key.empty() || binding.command.empty())
+    {
+        MessageBoxW(hwnd, L"status, key, and command are required.", L"Keymap", MB_ICONWARNING | MB_OK);
+        return false;
+    }
+
+    const int targetIndex = append ? -1 : state->selectedBindingIndex;
+    if (HasDuplicateKeymapBinding(*profile, binding, targetIndex))
+    {
+        MessageBoxW(hwnd, L"The same status and key already exist in this profile.", L"Keymap", MB_ICONWARNING | MB_OK);
+        return false;
+    }
+
+    if (!append && targetIndex >= 0 && targetIndex < static_cast<int>(profile->bindings.size()))
+    {
+        profile->bindings[static_cast<size_t>(targetIndex)] = binding;
+    }
+    else
+    {
+        profile->bindings.push_back(binding);
+        state->selectedBindingIndex = static_cast<int>(profile->bindings.size() - 1);
+    }
+    profile->updatedAt = L"";
+
+    PopulateKeymapBindingList(hwnd);
+    SendMessageW(state->bindingList, LB_SETCURSEL, state->selectedBindingIndex, 0);
+    LoadSelectedKeymapBinding(hwnd);
+    SetKeymapEditorMessage(hwnd, L"Edited in memory. Choose Save to write keymaps.json.");
+    return true;
+}
+
+void RemoveSelectedKeymapBinding(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    SumireKeymap::Profile* profile = GetSelectedKeymapProfile(state);
+    if (state == nullptr || profile == nullptr)
+    {
+        return;
+    }
+
+    if (state->selectedBindingIndex < 0 || state->selectedBindingIndex >= static_cast<int>(profile->bindings.size()))
+    {
+        return;
+    }
+
+    profile->bindings.erase(profile->bindings.begin() + state->selectedBindingIndex);
+    ClearKeymapBindingEditors(hwnd);
+    PopulateKeymapBindingList(hwnd);
+    SetKeymapEditorMessage(hwnd, L"Removed in memory. Choose Save to write keymaps.json.");
+}
+
+std::wstring MakeProfileIdFromPath(const std::filesystem::path& path)
+{
+    std::wstring id = path.stem().wstring();
+    for (wchar_t& ch : id)
+    {
+        if (!iswalnum(ch))
+        {
+            ch = L'-';
+        }
+        else
+        {
+            ch = static_cast<wchar_t>(towlower(ch));
+        }
+    }
+    return id.empty() ? L"imported" : id;
+}
+
+void ImportKeymapTsv(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state == nullptr)
+    {
+        return;
+    }
+
+    std::wstring buffer(MAX_PATH, L'\0');
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = hwnd;
+    dialog.lpstrFilter = L"TSV files (*.tsv)\0*.tsv\0All files (*.*)\0*.*\0";
+    dialog.lpstrFile = buffer.data();
+    dialog.nMaxFile = static_cast<DWORD>(buffer.size());
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (!GetOpenFileNameW(&dialog))
+    {
+        return;
+    }
+    buffer.resize(wcslen(buffer.c_str()));
+
+    const std::filesystem::path path(buffer);
+    std::wstring id = MakeProfileIdFromPath(path);
+    std::wstring uniqueId = id;
+    int suffix = 2;
+    bool duplicate = true;
+    while (duplicate)
+    {
+        duplicate = false;
+        for (const auto& profile : state->database.profiles)
+        {
+            if (profile.id == uniqueId)
+            {
+                duplicate = true;
+                uniqueId = id + L"-" + std::to_wstring(suffix++);
+                break;
+            }
+        }
+    }
+
+    std::wstring error;
+    if (!SumireKeymap::ImportTsvFileAsProfile(path, &state->database, uniqueId, path.stem().wstring(), true, &error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    if (!SumireKeymap::SaveDatabase(state->database, &error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    PopulateKeymapProfiles(hwnd);
+    ClearKeymapBindingEditors(hwnd);
+    SetKeymapEditorMessage(hwnd, L"Imported TSV and saved keymaps.json.");
+}
+
+void ExportSelectedKeymapTsv(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    SumireKeymap::Profile* profile = GetSelectedKeymapProfile(state);
+    if (state == nullptr || profile == nullptr)
+    {
+        return;
+    }
+
+    std::wstring buffer(MAX_PATH, L'\0');
+    const std::wstring defaultName = profile->id + L".tsv";
+    wcsncpy_s(buffer.data(), buffer.size(), defaultName.c_str(), _TRUNCATE);
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = hwnd;
+    dialog.lpstrFilter = L"TSV files (*.tsv)\0*.tsv\0All files (*.*)\0*.*\0";
+    dialog.lpstrFile = buffer.data();
+    dialog.nMaxFile = static_cast<DWORD>(buffer.size());
+    dialog.lpstrDefExt = L"tsv";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+    if (!GetSaveFileNameW(&dialog))
+    {
+        return;
+    }
+    buffer.resize(wcslen(buffer.c_str()));
+
+    std::wstring error;
+    if (!SumireKeymap::ExportProfileToTsv(state->database, profile->id, std::filesystem::path(buffer), &error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+    SetKeymapEditorMessage(hwnd, L"Exported TSV backup.");
+}
+
+void BackupKeymapJson(HWND hwnd)
+{
+    std::filesystem::path backupPath;
+    std::wstring error;
+    if (!SumireKeymap::BackupDatabase(&backupPath, &error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+    SetKeymapEditorMessage(hwnd, L"Backed up JSON: " + backupPath.wstring());
+}
+
+void OpenKeymapJsonInEditor(HWND hwnd)
+{
+    std::wstring error;
+    if (!SumireKeymap::EnsureInitialized(&error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    const std::filesystem::path jsonPath = SumireKeymap::GetKeymapJsonPath();
+    std::wstring commandLine = L"notepad.exe \"";
+    commandLine += jsonPath.wstring();
+    commandLine += L"\"";
+
+    STARTUPINFOW startupInfo = {};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo = {};
+    if (!CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startupInfo, &processInfo))
+    {
+        MessageBoxW(hwnd, L"Failed to launch notepad.", L"Keymap", MB_ICONERROR | MB_OK);
+        return;
+    }
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+    SetKeymapEditorMessage(hwnd, L"Opened keymaps.json. Reopen this window after manual edits.");
+}
+
+bool SaveKeymapDatabaseFromEditor(HWND hwnd)
+{
+    KeymapEditorState* state = GetKeymapEditorState(hwnd);
+    if (state == nullptr)
+    {
+        return false;
+    }
+
+    if (state->selectedProfileIndex >= 0 && state->selectedProfileIndex < static_cast<int>(state->database.profiles.size()))
+    {
+        state->database.activeProfileId = state->database.profiles[static_cast<size_t>(state->selectedProfileIndex)].id;
+    }
+
+    std::wstring error;
+    if (!SumireKeymap::SaveDatabase(state->database, &error))
+    {
+        MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+        return false;
+    }
+
+    SetKeymapEditorMessage(hwnd, L"Saved keymaps.json. Refocus the IME target app to reload it.");
+    return true;
+}
+
+LRESULT CALLBACK KeymapEditorWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_CREATE:
+        {
+            auto* state = new KeymapEditorState();
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+
+            std::wstring error;
+            if (!SumireKeymap::LoadDatabase(&state->database, &error))
+            {
+                MessageBoxW(hwnd, error.c_str(), L"Keymap", MB_ICONERROR | MB_OK);
+            }
+
+            CreateWindowW(L"STATIC", L"Profile", WS_CHILD | WS_VISIBLE, 16, 16, 80, 20, hwnd, nullptr, nullptr, nullptr);
+            state->profileCombo = CreateWindowW(WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | WS_BORDER | CBS_DROPDOWNLIST | WS_VSCROLL, 100, 14, 260, 160, hwnd, ControlMenu(IdKeymapProfile), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Import TSV...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 380, 12, 110, 26, hwnd, ControlMenu(IdKeymapImportTsv), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Export TSV...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 500, 12, 110, 26, hwnd, ControlMenu(IdKeymapExportTsv), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Backup JSON", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 620, 12, 110, 26, hwnd, ControlMenu(IdKeymapBackup), nullptr, nullptr);
+
+            state->bindingList = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY, 16, 52, 714, 260, hwnd, ControlMenu(IdKeymapList), nullptr, nullptr);
+
+            CreateWindowW(L"STATIC", L"status", WS_CHILD | WS_VISIBLE, 16, 330, 70, 20, hwnd, nullptr, nullptr, nullptr);
+            state->statusEdit = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, 326, 180, 24, hwnd, ControlMenu(IdKeymapStatus), nullptr, nullptr);
+            CreateWindowW(L"STATIC", L"key", WS_CHILD | WS_VISIBLE, 300, 330, 70, 20, hwnd, nullptr, nullptr, nullptr);
+            state->keyEdit = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 360, 326, 180, 24, hwnd, ControlMenu(IdKeymapKey), nullptr, nullptr);
+            state->enabledCheck = CreateWindowW(L"BUTTON", L"enabled", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 560, 326, 120, 24, hwnd, ControlMenu(IdKeymapEnabled), nullptr, nullptr);
+
+            CreateWindowW(L"STATIC", L"command", WS_CHILD | WS_VISIBLE, 16, 362, 70, 20, hwnd, nullptr, nullptr, nullptr);
+            state->commandEdit = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, 358, 440, 24, hwnd, ControlMenu(IdKeymapCommand), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Add", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 560, 356, 80, 26, hwnd, ControlMenu(IdKeymapAdd), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Update", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 650, 356, 80, 26, hwnd, ControlMenu(IdKeymapUpdate), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Remove", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 560, 388, 80, 26, hwnd, ControlMenu(IdKeymapRemove), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Open JSON", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 650, 388, 80, 26, hwnd, ControlMenu(IdKeymapOpenJson), nullptr, nullptr);
+
+            state->message = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 16, 424, 714, 44, hwnd, nullptr, nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 560, 480, 80, 28, hwnd, ControlMenu(IdKeymapSave), nullptr, nullptr);
+            CreateWindowW(L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 650, 480, 80, 28, hwnd, ControlMenu(IdKeymapClose), nullptr, nullptr);
+
+            PopulateKeymapProfiles(hwnd);
+            ClearKeymapBindingEditors(hwnd);
+            SetKeymapEditorMessage(hwnd, L"Unsupported commands are kept in JSON/TSV but are not executed yet.");
+        }
+        return 0;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IdKeymapProfile:
+            if (HIWORD(wParam) == CBN_SELCHANGE)
+            {
+                KeymapEditorState* state = GetKeymapEditorState(hwnd);
+                if (state != nullptr)
+                {
+                    state->selectedProfileIndex = static_cast<int>(SendMessageW(state->profileCombo, CB_GETCURSEL, 0, 0));
+                    if (state->selectedProfileIndex >= 0 && state->selectedProfileIndex < static_cast<int>(state->database.profiles.size()))
+                    {
+                        state->database.activeProfileId = state->database.profiles[static_cast<size_t>(state->selectedProfileIndex)].id;
+                    }
+                    ClearKeymapBindingEditors(hwnd);
+                    PopulateKeymapBindingList(hwnd);
+                }
+            }
+            return 0;
+        case IdKeymapList:
+            if (HIWORD(wParam) == LBN_SELCHANGE)
+            {
+                LoadSelectedKeymapBinding(hwnd);
+            }
+            return 0;
+        case IdKeymapAdd:
+            SaveKeymapBindingFromEditors(hwnd, true);
+            return 0;
+        case IdKeymapUpdate:
+            SaveKeymapBindingFromEditors(hwnd, false);
+            return 0;
+        case IdKeymapRemove:
+            RemoveSelectedKeymapBinding(hwnd);
+            return 0;
+        case IdKeymapSave:
+            SaveKeymapDatabaseFromEditor(hwnd);
+            return 0;
+        case IdKeymapImportTsv:
+            ImportKeymapTsv(hwnd);
+            return 0;
+        case IdKeymapExportTsv:
+            ExportSelectedKeymapTsv(hwnd);
+            return 0;
+        case IdKeymapBackup:
+            BackupKeymapJson(hwnd);
+            return 0;
+        case IdKeymapOpenJson:
+            OpenKeymapJsonInEditor(hwnd);
+            return 0;
+        case IdKeymapClose:
+            DestroyWindow(hwnd);
+            return 0;
+        default:
+            break;
+        }
+        return 0;
+
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_DESTROY:
+        {
+            KeymapEditorState* state = GetKeymapEditorState(hwnd);
+            delete state;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        }
+        return 0;
+
+    default:
+        break;
+    }
+
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+void OpenKeymapEditor(HWND owner)
+{
+    constexpr wchar_t kKeymapEditorClassName[] = L"SumireKeymapEditorWindow";
+    HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(owner, GWLP_HINSTANCE));
+
+    WNDCLASSW windowClass = {};
+    windowClass.lpfnWndProc = KeymapEditorWindowProc;
+    windowClass.hInstance = instance;
+    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    windowClass.lpszClassName = kKeymapEditorClassName;
+    RegisterClassW(&windowClass);
+
+    EnableWindow(owner, FALSE);
+    HWND editor = CreateWindowExW(
+        WS_EX_DLGMODALFRAME,
+        kKeymapEditorClassName,
+        L"Sumire Keymap",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        764,
+        560,
+        owner,
+        nullptr,
+        instance,
+        nullptr);
+
+    if (editor == nullptr)
+    {
+        EnableWindow(owner, TRUE);
+        return;
+    }
+
+    ShowWindow(editor, SW_SHOW);
+    UpdateWindow(editor);
+
+    MSG message = {};
+    while (IsWindow(editor) && GetMessageW(&message, nullptr, 0, 0) > 0)
+    {
+        if (!IsDialogMessageW(editor, &message))
+        {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+
+    EnableWindow(owner, TRUE);
+    SetForegroundWindow(owner);
 }
 
 std::wstring GetDefaultZenzModelRepoForPreset(const std::wstring& preset)
@@ -1735,6 +2339,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 ControlMenu(IdButtonUninstall),
                 nullptr,
                 nullptr);
+            CreateWindowW(
+                L"BUTTON",
+                L"Keymap...",
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                150,
+                644,
+                120,
+                28,
+                hwnd,
+                ControlMenu(IdButtonKeymap),
+                nullptr,
+                nullptr);
 
             state->status = CreateWindowW(
                 L"STATIC",
@@ -1807,6 +2423,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             return 0;
         case IdButtonUninstall:
             LaunchUninstaller(hwnd);
+            return 0;
+        case IdButtonKeymap:
+            OpenKeymapEditor(hwnd);
             return 0;
         case IdButtonClose:
             if (!GetWindowState(hwnd)->buildInProgress)

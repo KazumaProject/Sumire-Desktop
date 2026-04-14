@@ -51,6 +51,11 @@ private:
 
 STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
 {
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(_wParam, _lParam, &command))
+    {
+        return _pTextService->_HandleKeymapCommand(ec, _pContext, command, _wParam, _lParam);
+    }
 
     switch (_wParam)
     {
@@ -599,6 +604,163 @@ Exit:
     return hr;
 }
 
+HRESULT CTextService::_HandleKeymapCommand(TfEditCookie ec, ITfContext* pContext, const std::wstring& command, WPARAM wParam, LPARAM lParam)
+{
+    _pendingAlphabeticShift = FALSE;
+
+    if (command == L"InsertCharacter")
+    {
+        return _HandleCharacterKey(ec, pContext, wParam, lParam);
+    }
+    if (command == L"Backspace")
+    {
+        return _HandleBackspaceKey(ec, pContext);
+    }
+    if (command == L"Delete")
+    {
+        return _HandleDeleteKey(ec, pContext);
+    }
+    if (command == L"Cancel")
+    {
+        return _HandleEscapeKey(ec, pContext);
+    }
+    if (command == L"Commit")
+    {
+        return _HandleReturnKey(ec, pContext);
+    }
+    if (command == L"Convert")
+    {
+        return _HandleSpaceKey(ec, pContext);
+    }
+    if (command == L"ConvertNext")
+    {
+        return _SelectNextCandidate(ec, pContext);
+    }
+    if (command == L"ConvertPrev")
+    {
+        return _SelectPrevCandidate(ec, pContext);
+    }
+    if (command == L"ConvertNextPage")
+    {
+        return _SelectNextCandidatePage(ec, pContext);
+    }
+    if (command == L"ConvertPrevPage")
+    {
+        return _SelectPrevCandidatePage(ec, pContext);
+    }
+    if (command == L"MoveCursorLeft")
+    {
+        return _HandleArrowKey(ec, pContext, VK_LEFT);
+    }
+    if (command == L"MoveCursorRight")
+    {
+        return _HandleArrowKey(ec, pContext, VK_RIGHT);
+    }
+    if (command == L"MoveCursorToBeginning" || command == L"SegmentFocusFirst")
+    {
+        if (!_IsComposing() || _pComposition == nullptr)
+        {
+            return S_FALSE;
+        }
+        const InputMode mode = _GetCompositionInputMode();
+        bool moved = false;
+        while (_compositionState.GetPhase() == CompositionPhase::Composing &&
+               _compositionState.MoveLeft(mode, _romajiConverter))
+        {
+            moved = true;
+        }
+        while ((_compositionState.GetPhase() == CompositionPhase::Converting ||
+                _compositionState.GetPhase() == CompositionPhase::CandidateSelecting ||
+                _compositionState.GetPhase() == CompositionPhase::RechunkSelecting) &&
+               _compositionState.MoveFocusLeft())
+        {
+            moved = true;
+        }
+        _compositionPhase = _compositionState.GetPhase();
+        return moved ? _UpdateCompositionText(ec, pContext) : S_OK;
+    }
+    if (command == L"MoveCursorToEnd" || command == L"SegmentFocusLast")
+    {
+        if (!_IsComposing() || _pComposition == nullptr)
+        {
+            return S_FALSE;
+        }
+        const InputMode mode = _GetCompositionInputMode();
+        bool moved = false;
+        while (_compositionState.GetPhase() == CompositionPhase::Composing &&
+               _compositionState.MoveRight(mode, _romajiConverter))
+        {
+            moved = true;
+        }
+        while ((_compositionState.GetPhase() == CompositionPhase::Converting ||
+                _compositionState.GetPhase() == CompositionPhase::CandidateSelecting ||
+                _compositionState.GetPhase() == CompositionPhase::RechunkSelecting) &&
+               _compositionState.MoveFocusRight())
+        {
+            moved = true;
+        }
+        _compositionPhase = _compositionState.GetPhase();
+        return moved ? _UpdateCompositionText(ec, pContext) : S_OK;
+    }
+    if (command == L"SegmentFocusLeft")
+    {
+        if (!_IsComposing() || _pComposition == nullptr)
+        {
+            return S_FALSE;
+        }
+        if (!_compositionState.MoveFocusLeft())
+        {
+            return S_OK;
+        }
+        _compositionPhase = _compositionState.GetPhase();
+        return _UpdateCompositionText(ec, pContext);
+    }
+    if (command == L"SegmentFocusRight")
+    {
+        if (!_IsComposing() || _pComposition == nullptr)
+        {
+            return S_FALSE;
+        }
+        if (!_compositionState.MoveFocusRight())
+        {
+            return S_OK;
+        }
+        _compositionPhase = _compositionState.GetPhase();
+        return _UpdateCompositionText(ec, pContext);
+    }
+    if (command == L"SegmentWidthShrink")
+    {
+        return _HandleShiftArrowKey(ec, pContext, VK_LEFT);
+    }
+    if (command == L"SegmentWidthExpand")
+    {
+        return _HandleShiftArrowKey(ec, pContext, VK_RIGHT);
+    }
+    if (command == L"ToggleAlphanumericMode")
+    {
+        return _HandleModeToggleKey(ec, pContext);
+    }
+    if (command == L"IMEOn")
+    {
+        _SetKeyboardOpen(TRUE);
+        _UpdateLanguageBar();
+        return S_OK;
+    }
+    if (command == L"IMEOff" || command == L"CancelAndIMEOff")
+    {
+        if (command == L"CancelAndIMEOff" && _compositionState.GetPhase() != CompositionPhase::Idle)
+        {
+            _CancelConversion(ec, pContext);
+            _CloseCandidateList();
+        }
+        _SetKeyboardOpen(FALSE);
+        _UpdateLanguageBar();
+        return S_OK;
+    }
+
+    return S_FALSE;
+}
+
 HRESULT CTextService::_HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext)
 {
     _pendingAlphabeticShift = FALSE;
@@ -680,6 +842,11 @@ HRESULT CTextService::_HandleEscapeKey(TfEditCookie ec, ITfContext* pContext)
     if (_compositionState.GetPhase() != CompositionPhase::Converting &&
         _compositionState.GetPhase() != CompositionPhase::CandidateSelecting)
     {
+        if (_compositionState.GetPhase() == CompositionPhase::Composing)
+        {
+            _ClearCompositionText(ec, pContext);
+            _TerminateComposition(ec, pContext);
+        }
         return S_OK;
     }
 

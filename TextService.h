@@ -28,6 +28,7 @@
 #include "InputModeState.h"
 #include "InputScopeEvaluator.h"
 #include "KanaKanjiConverter.h"
+#include "KeymapStore.h"
 #include "RomajiKanaConverter.h"
 
 class CLangBarItemButton;
@@ -137,6 +138,8 @@ public:
     void _CloseCandidateList();
 
     HRESULT _InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    HRESULT _HandleKeymapCommand(TfEditCookie ec, ITfContext* pContext, const std::wstring& command, WPARAM wParam, LPARAM lParam);
+    bool _TryGetKeymapCommand(WPARAM wParam, LPARAM lParam, std::wstring* command) const;
 
     void  _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
     BOOL  _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext, TfGuidAtom gaDisplayAttribute);
@@ -222,6 +225,7 @@ private:
 
     // utility function for KeyEventSink
     BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    std::wstring _GetKeymapStatus() const;
     void _UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr);
     void _KeyboardOpenCloseChanged();
     void _KeyboardInputConversionChanged();
@@ -296,6 +300,7 @@ private:
     std::wstring _liveConversionSourceViewText;
     bool _liveConversionSourceViewBusy;
     std::wstring _converterSettingsSignature;
+    SumireKeymap::RuntimeKeymap _keymap;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;
