@@ -556,7 +556,9 @@ bool CompositionState::StartConversion(
     const KanaKanjiConverter& kanaKanjiConverter,
     InputMode mode,
     const RomajiKanaConverter& converter,
-    const std::wstring& leftContext)
+    const std::wstring& leftContext,
+    bool liveConversionEnabled,
+    const std::vector<ConversionCandidate>& preferredCandidates)
 {
     if (_rawInput.empty())
     {
@@ -625,9 +627,23 @@ bool CompositionState::StartConversion(
         return true;
     }
 
-    KanaKanjiConverter::ConvertOptions convertOptions;
-    convertOptions.leftContext = leftContext;
-    const ConversionResult result = kanaKanjiConverter.Convert(_reading, convertOptions);
+    ConversionResult result;
+    if (!preferredCandidates.empty())
+    {
+        result.candidates = preferredCandidates;
+    }
+    else if (HasLiveConversionPreviewForCurrentReading())
+    {
+        result.candidates = _liveConversionCandidates;
+    }
+    else
+    {
+        KanaKanjiConverter::ConvertOptions convertOptions;
+        convertOptions.useZenz = !liveConversionEnabled;
+        convertOptions.leftContext = leftContext;
+        result = kanaKanjiConverter.Convert(_reading, convertOptions);
+    }
+
     if (result.candidates.empty())
     {
         return false;
@@ -753,6 +769,64 @@ bool CompositionState::BeginRechunkSelection(const RomajiKanaConverter& converte
     UpdateRechunkSelection(0);
     RebuildConversionDisplay();
     return true;
+}
+
+bool CompositionState::AdjustFocusedSegmentBoundary(bool adjustLeft, const RomajiKanaConverter& converter)
+{
+    const Segment* focusedSegment = GetFocusedSegment();
+    if (focusedSegment == nullptr)
+    {
+        return false;
+    }
+
+    const LONG currentStart = focusedSegment->start;
+    const LONG currentEnd = focusedSegment->end;
+    const std::vector<RechunkOption> options = BuildRechunkOptionsForFocusedSegment(converter);
+
+    const RechunkOption* bestOption = nullptr;
+    int bestReplacementIndex = -1;
+    LONG bestDelta = 0;
+
+    for (const RechunkOption& option : options)
+    {
+        for (size_t replacementIndex = 0; replacementIndex < option.replacementSegments.size(); ++replacementIndex)
+        {
+            const Segment& replacement = option.replacementSegments[replacementIndex];
+            LONG delta = 0;
+            if (adjustLeft)
+            {
+                if (replacement.end != currentEnd || replacement.start >= currentStart)
+                {
+                    continue;
+                }
+
+                delta = currentStart - replacement.start;
+            }
+            else
+            {
+                if (replacement.start != currentStart || replacement.end <= currentEnd)
+                {
+                    continue;
+                }
+
+                delta = replacement.end - currentEnd;
+            }
+
+            if (bestOption == nullptr || delta < bestDelta)
+            {
+                bestOption = &option;
+                bestReplacementIndex = static_cast<int>(replacementIndex);
+                bestDelta = delta;
+            }
+        }
+    }
+
+    if (bestOption == nullptr || bestReplacementIndex < 0)
+    {
+        return false;
+    }
+
+    return ApplyRechunkOption(*bestOption, bestReplacementIndex);
 }
 
 bool CompositionState::SelectNextCandidate()
@@ -1011,23 +1085,34 @@ bool CompositionState::ApplySelectedRechunkOption()
         return false;
     }
 
-    if (option->replaceSegmentStart < 0 ||
-        option->replaceSegmentEnd < option->replaceSegmentStart ||
-        option->replaceSegmentEnd >= static_cast<int>(_conversionSession.segments.size()))
+    return ApplyRechunkOption(*option, 0);
+}
+
+bool CompositionState::ApplyRechunkOption(const RechunkOption& option, int focusedReplacementIndex)
+{
+    if (option.replaceSegmentStart < 0 ||
+        option.replaceSegmentEnd < option.replaceSegmentStart ||
+        option.replaceSegmentEnd >= static_cast<int>(_conversionSession.segments.size()))
     {
         return false;
     }
 
+    if (focusedReplacementIndex < 0 ||
+        focusedReplacementIndex >= static_cast<int>(option.replacementSegments.size()))
+    {
+        focusedReplacementIndex = 0;
+    }
+
     std::vector<Segment>& segments = _conversionSession.segments;
-    const std::vector<Segment>::iterator eraseBegin = segments.begin() + option->replaceSegmentStart;
-    const std::vector<Segment>::iterator eraseEnd = segments.begin() + option->replaceSegmentEnd + 1;
+    const std::vector<Segment>::iterator eraseBegin = segments.begin() + option.replaceSegmentStart;
+    const std::vector<Segment>::iterator eraseEnd = segments.begin() + option.replaceSegmentEnd + 1;
     segments.erase(eraseBegin, eraseEnd);
     segments.insert(
-        segments.begin() + option->replaceSegmentStart,
-        option->replacementSegments.begin(),
-        option->replacementSegments.end());
+        segments.begin() + option.replaceSegmentStart,
+        option.replacementSegments.begin(),
+        option.replacementSegments.end());
 
-    _conversionSession.focusedSegmentIndex = option->replaceSegmentStart;
+    _conversionSession.focusedSegmentIndex = option.replaceSegmentStart + focusedReplacementIndex;
     _conversionSession.rechunkOptions.clear();
     _conversionSession.rechunkLabels.clear();
     _conversionSession.selectedRechunkOptionIndex = -1;

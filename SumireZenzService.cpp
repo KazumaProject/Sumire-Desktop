@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <cwctype>
 #include <filesystem>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -557,6 +556,7 @@ struct ModelRuntime
     std::wstring currentModelPath;
     llama_model* model = nullptr;
     llama_context* context = nullptr;
+    std::vector<llama_token> cachedPromptTokens;
     std::mutex mutex;
 
     ~ModelRuntime()
@@ -578,6 +578,7 @@ struct ModelRuntime
             model = nullptr;
         }
         currentModelPath.clear();
+        cachedPromptTokens.clear();
     }
 
     bool EnsureLoaded(const std::wstring& modelPath, const std::wstring&)
@@ -633,8 +634,14 @@ struct ModelRuntime
         const std::wstring& leftContext,
         const std::wstring& reading,
         std::uint64_t requestId,
-        const std::function<bool(const std::wstring&)>& onPartial)
+        DWORD timeoutMs)
     {
+        const ULONGLONG startedAt = GetTickCount64();
+        auto timedOut = [startedAt, timeoutMs]()
+        {
+            return timeoutMs > 0 && GetTickCount64() - startedAt >= timeoutMs;
+        };
+
         if (!IsLatestGenerateRequest(requestId))
         {
             return L"";
@@ -650,22 +657,53 @@ struct ModelRuntime
         {
             return L"";
         }
-        llama_kv_cache_clear(context);
 
         const std::string prompt = BuildPrompt(WideToUtf8(leftContext), WideToUtf8(reading));
+        if (timedOut())
+        {
+            return L"";
+        }
+
         std::vector<llama_token> promptTokens = Tokenize(model, prompt, true);
         if (promptTokens.empty())
         {
             return L"";
         }
 
-        int nPast = 0;
-        if (!DecodeTokens(context, promptTokens, &nPast))
+        size_t reuseCount = 0;
+        const size_t commonLimit = (std::min)(cachedPromptTokens.size(), promptTokens.size());
+        while (reuseCount < commonLimit && cachedPromptTokens[reuseCount] == promptTokens[reuseCount])
+        {
+            ++reuseCount;
+        }
+
+        if (reuseCount == promptTokens.size() && reuseCount > 0)
+        {
+            --reuseCount;
+        }
+
+        if (reuseCount == 0)
+        {
+            llama_kv_cache_clear(context);
+            cachedPromptTokens.clear();
+        }
+        else
+        {
+            llama_kv_cache_seq_rm(context, 0, static_cast<llama_pos>(reuseCount), -1);
+            cachedPromptTokens.resize(reuseCount);
+        }
+
+        std::vector<llama_token> promptSuffix(promptTokens.begin() + static_cast<std::ptrdiff_t>(reuseCount), promptTokens.end());
+        int nPast = static_cast<int>(reuseCount);
+        if (!DecodeTokens(context, promptSuffix, &nPast))
         {
             return L"";
         }
-        if (!IsLatestGenerateRequest(requestId))
+        cachedPromptTokens = promptTokens;
+
+        if (!IsLatestGenerateRequest(requestId) || timedOut())
         {
+            llama_kv_cache_seq_rm(context, 0, static_cast<llama_pos>(promptTokens.size()), -1);
             return L"";
         }
 
@@ -674,11 +712,13 @@ struct ModelRuntime
         const std::unordered_set<std::string> stopPieces = {"、", "。", "！", "？"};
 
         std::string generated;
+        bool aborted = false;
         for (int step = 0; step < 24; ++step)
         {
-            if (!IsLatestGenerateRequest(requestId))
+            if (!IsLatestGenerateRequest(requestId) || timedOut())
             {
-                return L"";
+                aborted = true;
+                break;
             }
 
             float* logits = llama_get_logits_ith(context, -1);
@@ -711,15 +751,6 @@ struct ModelRuntime
             }
 
             generated += piece;
-            if (onPartial)
-            {
-                const std::wstring partial = TrimWide(Utf8ToWide(generated));
-                if (!partial.empty() && !onPartial(partial))
-                {
-                    return L"";
-                }
-            }
-
             std::vector<llama_token> stepTokens(1, token);
             if (!DecodeTokens(context, stepTokens, &nPast))
             {
@@ -727,7 +758,8 @@ struct ModelRuntime
             }
         }
 
-        return TrimWide(Utf8ToWide(generated));
+        llama_kv_cache_seq_rm(context, 0, static_cast<llama_pos>(promptTokens.size()), -1);
+        return aborted ? std::wstring() : TrimWide(Utf8ToWide(generated));
     }
 };
 
@@ -775,7 +807,7 @@ bool HandleClient(HANDLE pipe)
         leftContext,
         reading,
         requestId,
-        std::function<bool(const std::wstring&)>());
+        request.timeoutMs);
     return WriteResponse(
         pipe,
         generated.empty() ? ZenzProtocol::Status::Error : ZenzProtocol::Status::Ok,

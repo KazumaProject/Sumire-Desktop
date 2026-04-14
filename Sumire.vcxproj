@@ -177,6 +177,7 @@
     <ClCompile Include="KeyEventSink.cpp" />
     <ClCompile Include="KeyHandler.cpp" />
     <ClCompile Include="KanaKanjiConverter.cpp" />
+    <ClCompile Include="KeymapStore.cpp" />
     <ClCompile Include="LexiconRegistry.cpp" />
     <ClCompile Include="LanguageBar.cpp" />
     <ClCompile Include="MozcSystemLexicon.cpp" />
@@ -208,6 +209,7 @@
     <ClInclude Include="InputModeState.h" />
     <ClInclude Include="InputScopeEvaluator.h" />
     <ClInclude Include="KanaKanjiConverter.h" />
+    <ClInclude Include="KeymapStore.h" />
     <ClInclude Include="LanguageBar.h" />
     <ClInclude Include="LexiconRegistry.h" />
     <ClInclude Include="msctf.h" />
@@ -224,6 +226,8 @@
     <ResourceCompile Include="TextService.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="keymaps\atok.tsv" />
+    <None Include="keymaps\ms-ime.tsv" />
     <None Include="romaji-hiragana.tsv" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

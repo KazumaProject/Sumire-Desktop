@@ -341,9 +341,12 @@ CTextService::CTextService()
     _liveConversionSourceViewWindow = NULL;
     _liveConversionWorkerRunning = false;
     _liveConversionHasPendingRequest = false;
+    _liveConversionActiveJobs = 0;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _liveConversionCompletedIsFinal = false;
+    _liveZenzCandidateVersion = 0;
+    _liveZenzCandidateHasFinal = false;
     _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
@@ -388,9 +391,12 @@ CTextService::~CTextService()
     _liveConversionSourceViewWindow = NULL;
     _liveConversionWorkerRunning = false;
     _liveConversionHasPendingRequest = false;
+    _liveConversionActiveJobs = 0;
     _liveConversionLatestRequestedVersion = 0;
     _liveConversionCompletedVersion = 0;
     _liveConversionCompletedIsFinal = false;
+    _liveZenzCandidateVersion = 0;
+    _liveZenzCandidateHasFinal = false;
     _liveConversionSourceViewBusy = false;
     _pendingInternalEdits = 0;
     _liveConversionLatestRequestedAt = std::chrono::steady_clock::time_point();
@@ -809,55 +815,103 @@ BOOL CTextService::_InitLiveConversionAsync()
                 _liveConversionHasPendingRequest = false;
             }
 
-            KanaKanjiConverter::ConvertOptions convertOptions;
-            convertOptions.useZenz = _kanaKanjiConverter.IsZenzEnabled();
-            convertOptions.zenzOnly = convertOptions.useZenz;
-            convertOptions.leftContext = leftContext;
-            ConversionResult result = _kanaKanjiConverter.Convert(reading, [this, version]()
-            {
-                std::lock_guard<std::mutex> lock(_liveConversionMutex);
-                return !_liveConversionWorkerRunning ||
-                    version != _liveConversionLatestRequestedVersion;
-            }, convertOptions);
-            if (convertOptions.zenzOnly && result.candidates.empty())
-            {
-                convertOptions.useZenz = false;
-                convertOptions.zenzOnly = false;
-                result = _kanaKanjiConverter.Convert(reading, [this, version]()
-                {
-                    std::lock_guard<std::mutex> lock(_liveConversionMutex);
-                    return !_liveConversionWorkerRunning ||
-                        version != _liveConversionLatestRequestedVersion;
-                }, convertOptions);
-            }
-
-            bool shouldNotify = false;
             {
                 std::lock_guard<std::mutex> lock(_liveConversionMutex);
                 if (!_liveConversionWorkerRunning)
                 {
                     break;
                 }
+                ++_liveConversionActiveJobs;
+            }
 
-                if (version != _liveConversionLatestRequestedVersion ||
-                    reading != _liveConversionLatestRequestedReading ||
-                    leftContext != _liveConversionLatestRequestedLeftContext)
+            std::thread([this, reading, leftContext, version]()
+            {
+                const bool zenzEnabled = _kanaKanjiConverter.IsZenzEnabled();
+                bool shouldNotify = false;
+                if (!zenzEnabled)
                 {
-                    continue;
+                    KanaKanjiConverter::ConvertOptions convertOptions;
+                    convertOptions.leftContext = leftContext;
+                    convertOptions.useZenz = false;
+                    convertOptions.zenzOnly = false;
+                    ConversionResult inlineResult = _kanaKanjiConverter.Convert(reading, [this, version]()
+                    {
+                        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                        return !_liveConversionWorkerRunning ||
+                            version != _liveConversionLatestRequestedVersion;
+                    }, convertOptions);
+
+                    {
+                        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                        if (_liveConversionWorkerRunning &&
+                            version == _liveConversionLatestRequestedVersion &&
+                            reading == _liveConversionLatestRequestedReading &&
+                            leftContext == _liveConversionLatestRequestedLeftContext)
+                        {
+                            _liveConversionCompletedReading = reading;
+                            _liveConversionCompletedLeftContext = leftContext;
+                            _liveConversionCompletedCandidates = std::move(inlineResult.candidates);
+                            _liveConversionCompletedVersion = version;
+                            _liveConversionCompletedIsFinal = true;
+                            shouldNotify = true;
+                        }
+                    }
+
+                    if (shouldNotify && _liveConversionWindow != NULL)
+                    {
+                        PostMessageW(_liveConversionWindow, WM_SUMIRE_LIVE_CONVERSION_READY, 0, 0);
+                    }
                 }
 
-                _liveConversionCompletedReading = reading;
-                _liveConversionCompletedLeftContext = leftContext;
-                _liveConversionCompletedCandidates = std::move(result.candidates);
-                _liveConversionCompletedVersion = version;
-                _liveConversionCompletedIsFinal = true;
-                shouldNotify = true;
-            }
+                if (zenzEnabled)
+                {
+                    KanaKanjiConverter::ConvertOptions zenzOptions;
+                    zenzOptions.useZenz = true;
+                    zenzOptions.zenzOnly = true;
+                    zenzOptions.leftContext = leftContext;
+                    ConversionResult zenzResult = _kanaKanjiConverter.Convert(reading, [this, version]()
+                    {
+                        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                        return !_liveConversionWorkerRunning ||
+                            version != _liveConversionLatestRequestedVersion;
+                    }, zenzOptions);
 
-            if (shouldNotify && _liveConversionWindow != NULL)
-            {
-                PostMessageW(_liveConversionWindow, WM_SUMIRE_LIVE_CONVERSION_READY, 0, 0);
-            }
+                    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                    if (_liveConversionWorkerRunning &&
+                        version == _liveConversionLatestRequestedVersion &&
+                        reading == _liveConversionLatestRequestedReading &&
+                        leftContext == _liveConversionLatestRequestedLeftContext &&
+                        !zenzResult.candidates.empty() &&
+                        !zenzResult.candidates[0].surface.empty())
+                    {
+                        _liveZenzCandidateReading = reading;
+                        _liveZenzCandidateLeftContext = leftContext;
+                        _liveZenzCandidateSurface = zenzResult.candidates[0].surface;
+                        _liveZenzCandidateVersion = version;
+                        _liveZenzCandidateHasFinal = true;
+                        _liveConversionCompletedReading = reading;
+                        _liveConversionCompletedLeftContext = leftContext;
+                        _liveConversionCompletedCandidates = std::move(zenzResult.candidates);
+                        _liveConversionCompletedVersion = version;
+                        _liveConversionCompletedIsFinal = true;
+                        shouldNotify = true;
+                    }
+                }
+
+                if (shouldNotify && _liveConversionWindow != NULL)
+                {
+                    PostMessageW(_liveConversionWindow, WM_SUMIRE_LIVE_CONVERSION_READY, 0, 0);
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(_liveConversionMutex);
+                    if (_liveConversionActiveJobs > 0)
+                    {
+                        --_liveConversionActiveJobs;
+                    }
+                }
+                _liveConversionCv.notify_all();
+            }).detach();
         }
     });
 
@@ -878,12 +932,25 @@ void CTextService::_UninitLiveConversionAsync()
         _liveConversionCompletedLeftContext.clear();
         _liveConversionCompletedCandidates.clear();
         _liveConversionCompletedIsFinal = false;
+        _liveZenzCandidateReading.clear();
+        _liveZenzCandidateLeftContext.clear();
+        _liveZenzCandidateSurface.clear();
+        _liveZenzCandidateVersion = 0;
+        _liveZenzCandidateHasFinal = false;
     }
     _liveConversionCv.notify_all();
 
     if (_liveConversionWorker.joinable())
     {
         _liveConversionWorker.join();
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(_liveConversionMutex);
+        _liveConversionCv.wait(lock, [this]()
+        {
+            return _liveConversionActiveJobs == 0;
+        });
     }
 
     if (_liveConversionWindow != NULL)
@@ -905,7 +972,10 @@ void CTextService::_QueueLiveConversionRequest(const std::wstring& reading, cons
         leftContext == _liveConversionLatestRequestedLeftContext &&
         (_liveConversionHasPendingRequest ||
             (_liveConversionCompletedReading == reading &&
-                _liveConversionCompletedLeftContext == leftContext)))
+                _liveConversionCompletedLeftContext == leftContext) ||
+            (_liveZenzCandidateHasFinal &&
+                _liveZenzCandidateReading == reading &&
+                _liveZenzCandidateLeftContext == leftContext)))
     {
         return;
     }
@@ -935,6 +1005,11 @@ void CTextService::_CancelLiveConversionRequests()
     _liveConversionCompletedCandidates.clear();
     _liveConversionCompletedVersion = 0;
     _liveConversionCompletedIsFinal = false;
+    _liveZenzCandidateReading.clear();
+    _liveZenzCandidateLeftContext.clear();
+    _liveZenzCandidateSurface.clear();
+    _liveZenzCandidateVersion = 0;
+    _liveZenzCandidateHasFinal = false;
 }
 
 bool CTextService::_CanUseLiveConversionPreview() const
@@ -997,6 +1072,15 @@ void CTextService::_HideLiveConversionSourceView()
 bool CTextService::_IsLiveConversionBusyForCurrentReading(const std::wstring& reading)
 {
     std::lock_guard<std::mutex> lock(_liveConversionMutex);
+    if (_kanaKanjiConverter.IsZenzEnabled())
+    {
+        return !reading.empty() &&
+            _liveConversionLatestRequestedReading == reading &&
+            (_liveConversionHasPendingRequest || _liveConversionActiveJobs > 0) &&
+            (!_liveZenzCandidateHasFinal ||
+                _liveZenzCandidateVersion != _liveConversionLatestRequestedVersion);
+    }
+
     return !reading.empty() &&
         _liveConversionLatestRequestedReading == reading &&
         (!_liveConversionCompletedIsFinal ||
@@ -1163,6 +1247,7 @@ void CTextService::_PaintLiveConversionSourceView(HDC hdc, const RECT& bounds) c
 void CTextService::_ReloadSettings()
 {
     const SumireSettingsStore::Settings settings = SumireSettingsStore::Load();
+    SumireKeymap::LoadRuntimeKeymap(&_keymap, nullptr);
     _liveConversionEnabled = settings.liveConversionEnabled ? TRUE : FALSE;
     _liveConversionSourceViewEnabled = settings.liveConversionSourceViewEnabled ? TRUE : FALSE;
     if (_liveConversionSourceViewEnabled == FALSE)
@@ -1176,6 +1261,12 @@ void CTextService::_ReloadSettings()
         _kanaKanjiConverter = KanaKanjiConverter();
         _kanaKanjiConverter.WarmUpZenzAsync();
         _converterSettingsSignature = converterSettingsSignature;
+        std::lock_guard<std::mutex> lock(_liveConversionMutex);
+        _liveZenzCandidateReading.clear();
+        _liveZenzCandidateLeftContext.clear();
+        _liveZenzCandidateSurface.clear();
+        _liveZenzCandidateVersion = 0;
+        _liveZenzCandidateHasFinal = false;
     }
     _romajiConverter.ReloadFromSettings();
 }

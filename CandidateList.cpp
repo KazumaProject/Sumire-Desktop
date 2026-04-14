@@ -47,16 +47,18 @@ private:
 class CCandidateKeyEditSession : public CEditSessionBase
 {
 public:
-    CCandidateKeyEditSession(CTextService* pTextService, ITfContext* pContext, WPARAM wParam)
+    CCandidateKeyEditSession(CTextService* pTextService, ITfContext* pContext, WPARAM wParam, LPARAM lParam)
         : CEditSessionBase(pTextService, pContext)
     {
         _wParam = wParam;
+        _lParam = lParam;
     }
 
     STDMETHODIMP DoEditSession(TfEditCookie ec);
 
 private:
     WPARAM _wParam;
+    LPARAM _lParam;
 };
 
 //+---------------------------------------------------------------------------
@@ -78,6 +80,11 @@ STDAPI CGetTextExtentEditSession::DoEditSession(TfEditCookie ec)
 STDAPI CCandidateKeyEditSession::DoEditSession(TfEditCookie ec)
 {
     HRESULT hr = S_OK;
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(_wParam, _lParam, &command))
+    {
+        return _pTextService->_HandleKeymapCommand(ec, _pContext, command, _wParam, _lParam);
+    }
 
     switch (_wParam)
     {
@@ -229,6 +236,13 @@ STDAPI CCandidateList::OnKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(wParam, lParam, &command))
+    {
+        *pfEaten = TRUE;
+    }
+    else
+    {
     switch (wParam)
     {
     case VK_UP:
@@ -246,8 +260,9 @@ STDAPI CCandidateList::OnKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
         *pfEaten = FALSE;
         return S_OK;
     }
+    }
 
-    CCandidateKeyEditSession* pEditSession = new CCandidateKeyEditSession(_pTextService, _pContextDocument, wParam);
+    CCandidateKeyEditSession* pEditSession = new CCandidateKeyEditSession(_pTextService, _pContextDocument, wParam, lParam);
     if (pEditSession != NULL)
     {
         HRESULT hr = E_FAIL;
@@ -307,6 +322,13 @@ STDAPI CCandidateList::OnKeyUp(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
     if (pfEaten == NULL)
         return E_INVALIDARG;
 
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(wParam, lParam, &command))
+    {
+        *pfEaten = TRUE;
+        return S_OK;
+    }
+
     switch (wParam)
     {
     case VK_UP:
@@ -338,6 +360,13 @@ STDAPI CCandidateList::OnTestKeyDown(WPARAM wParam, LPARAM lParam, BOOL *pfEaten
 {
     if (pfEaten == NULL)
         return E_INVALIDARG;
+
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(wParam, lParam, &command))
+    {
+        *pfEaten = TRUE;
+        return S_OK;
+    }
 
     switch (wParam)
     {
@@ -371,6 +400,13 @@ STDAPI CCandidateList::OnTestKeyUp(WPARAM wParam, LPARAM lParam, BOOL *pfEaten)
 {
     if (pfEaten == NULL)
         return E_INVALIDARG;
+
+    std::wstring command;
+    if (_pTextService->_TryGetKeymapCommand(wParam, lParam, &command))
+    {
+        *pfEaten = TRUE;
+        return S_OK;
+    }
 
     switch (wParam)
     {

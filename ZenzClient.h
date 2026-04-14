@@ -23,8 +23,7 @@ public:
         const std::wstring& reading,
         const std::wstring& leftContext,
         DWORD timeoutMs,
-        const std::function<bool()>& shouldCancel,
-        const std::function<void(const std::wstring&)>& onPartial = std::function<void(const std::wstring&)>()) const;
+        const std::function<bool()>& shouldCancel) const;
     void WarmUpAsync() const;
 
     bool IsEnabled() const;

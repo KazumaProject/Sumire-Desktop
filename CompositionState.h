@@ -126,10 +126,13 @@ public:
         const KanaKanjiConverter& kanaKanjiConverter,
         InputMode mode,
         const RomajiKanaConverter& converter,
-        const std::wstring& leftContext = std::wstring());
+        const std::wstring& leftContext = std::wstring(),
+        bool liveConversionEnabled = false,
+        const std::vector<ConversionCandidate>& preferredCandidates = std::vector<ConversionCandidate>());
     void EnterCandidateSelecting();
     bool BeginSegmentSelection();
     bool BeginRechunkSelection(const RomajiKanaConverter& converter);
+    bool AdjustFocusedSegmentBoundary(bool adjustLeft, const RomajiKanaConverter& converter);
     bool SelectNextCandidate();
     bool SelectPrevCandidate();
     bool SelectFirstCandidate();
@@ -172,6 +175,7 @@ private:
     void UpdateSegmentSelection(Segment& segment, int index);
     void UpdateRechunkSelection(int index);
     void UpdateBoundariesFromSegments();
+    bool ApplyRechunkOption(const RechunkOption& option, int focusedReplacementIndex);
     std::vector<RechunkOption> BuildRechunkOptionsForFocusedSegment(const RomajiKanaConverter& converter) const;
     Segment BuildSegmentFromBunsetsu(const BunsetsuConversion& bunsetsu, const RomajiKanaConverter& converter) const;
     void SyncLegacyBuffer();

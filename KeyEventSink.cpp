@@ -122,29 +122,7 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lPara
     }
 
     //
-    // 2. 入力モード共通で扱いたいキー
-    //    - F12: IME 内部の「あ／ENG」モード切替用
-    //      → KeyHandler（CKeyHandlerEditSession）に処理させるため IME が食う
-    //
-    if (wParam == VK_F12)
-    {
-        DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=TRUE\r\n");
-        return TRUE;
-    }
-
-    //
-    // 3. IME OFF なら食べない
-    if (!_IsKeyboardOpen())
-    {
-        if (wParam == VK_F12)
-        {
-            DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=FALSE reason=keyboard_closed\r\n");
-        }
-        return FALSE;
-    }
-
-    //
-    // 4. 候補ウィンドウ表示中は、キー処理を CandidateList 側に任せる
+    // 2. 候補ウィンドウ表示中は、キー処理を CandidateList 側に任せる
     //    （元サンプルと同じ挙動）
     //
     if (_pCandidateList &&
@@ -153,45 +131,79 @@ BOOL CTextService::_IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lPara
         return FALSE;
     }
 
-    //
-    // 5. ENG モード (半角英数モード) のとき:
-    //    - 通常のキー入力はアプリケーションにそのまま流す
-    //    - つまりローマ字かな変換は走らない
-    //
-    if (GetEffectiveInputMode() == InputMode::DirectInput)
+    std::wstring command;
+    if (_TryGetKeymapCommand(wParam, lParam, &command))
     {
-        // 上で F12 だけは TRUE で返しているので、ここでは全て FALSE
-        return FALSE;
-    }
-
-    //
-    // 6. ここからは「ひらがなモード」のキー判定
-    //    - 元のサンプルのロジックをベースに、ローマ字入力用として A〜Z, 0〜9 を食う
-    //
-    switch (wParam)
-    {
-    case VK_SHIFT:
-        if (GetEffectiveInputMode() == InputMode::Hiragana)
-            return TRUE;
-        return FALSE;
-    case VK_LEFT:
-    case VK_RIGHT:
-    case VK_RETURN:
-    case VK_SPACE:
-    case VK_BACK:
-    case VK_DELETE:
-    case VK_ESCAPE:
-        // composition 中だけ IME 側で処理
-        if (GetCompositionPhase() != CompositionPhase::Idle)
-            return TRUE;
-        return FALSE;
-    }
-
-    // A〜Z はローマ字かな入力として IME が食う
-    if (CanTranslateToPrintableChar(wParam, lParam))
         return TRUE;
+    }
+
+    // F12 は現在の内部モード切替の後方互換として残す。
+    if (wParam == VK_F12)
+    {
+        DebugLog(L"[_IsKeyEaten] wParam=VK_F12 result=TRUE fallback\r\n");
+        return TRUE;
+    }
+
+    if (!_IsKeyboardOpen())
+    {
+        return FALSE;
+    }
+
+    if (wParam == VK_SHIFT && GetEffectiveInputMode() == InputMode::Hiragana)
+    {
+        return TRUE;
+    }
 
     return FALSE;
+}
+
+std::wstring CTextService::_GetKeymapStatus() const
+{
+    if (GetEffectiveInputMode() == InputMode::DirectInput)
+    {
+        return L"DirectInput";
+    }
+
+    switch (_compositionState.GetPhase())
+    {
+    case CompositionPhase::Idle:
+        return L"Precomposition";
+    case CompositionPhase::Composing:
+        return L"Composition";
+    case CompositionPhase::Converting:
+    case CompositionPhase::CandidateSelecting:
+    case CompositionPhase::RechunkSelecting:
+        return L"Conversion";
+    default:
+        return L"Precomposition";
+    }
+}
+
+bool CTextService::_TryGetKeymapCommand(WPARAM wParam, LPARAM lParam, std::wstring* command) const
+{
+    bool printableAscii = false;
+    const std::wstring key = SumireKeymap::NormalizeKeyStroke(wParam, lParam, &printableAscii);
+    if (key.empty())
+    {
+        return false;
+    }
+
+    std::wstring foundCommand;
+    if (!SumireKeymap::FindCommand(_keymap, _GetKeymapStatus(), key, printableAscii, &foundCommand))
+    {
+        return false;
+    }
+
+    if (!SumireKeymap::IsSupportedCommand(foundCommand))
+    {
+        return false;
+    }
+
+    if (command != nullptr)
+    {
+        *command = foundCommand;
+    }
+    return true;
 }
 
 //+---------------------------------------------------------------------------

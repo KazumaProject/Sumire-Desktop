@@ -28,6 +28,7 @@
 #include "InputModeState.h"
 #include "InputScopeEvaluator.h"
 #include "KanaKanjiConverter.h"
+#include "KeymapStore.h"
 #include "RomajiKanaConverter.h"
 
 class CLangBarItemButton;
@@ -118,6 +119,7 @@ public:
     HRESULT _HandleCharacterKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam, LPARAM lParam);
     HRESULT _HandleShiftKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
+    HRESULT _HandleShiftArrowKey(TfEditCookie ec, ITfContext* pContext, WPARAM wParam);
     HRESULT _HandleReturnKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleSpaceKey(TfEditCookie ec, ITfContext* pContext);
     HRESULT _HandleBackspaceKey(TfEditCookie ec, ITfContext* pContext);
@@ -136,6 +138,8 @@ public:
     void _CloseCandidateList();
 
     HRESULT _InvokeKeyHandler(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    HRESULT _HandleKeymapCommand(TfEditCookie ec, ITfContext* pContext, const std::wstring& command, WPARAM wParam, LPARAM lParam);
+    bool _TryGetKeymapCommand(WPARAM wParam, LPARAM lParam, std::wstring* command) const;
 
     void  _ClearCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext);
     BOOL  _SetCompositionDisplayAttributes(TfEditCookie ec, ITfContext* pContext, TfGuidAtom gaDisplayAttribute);
@@ -221,6 +225,7 @@ private:
 
     // utility function for KeyEventSink
     BOOL _IsKeyEaten(ITfContext* pContext, WPARAM wParam, LPARAM lParam);
+    std::wstring _GetKeymapStatus() const;
     void _UpdateInputScopeForDocumentMgr(ITfDocumentMgr* pDocMgr);
     void _KeyboardOpenCloseChanged();
     void _KeyboardInputConversionChanged();
@@ -275,6 +280,7 @@ private:
     std::condition_variable _liveConversionCv;
     bool _liveConversionWorkerRunning;
     bool _liveConversionHasPendingRequest;
+    int _liveConversionActiveJobs;
     std::wstring _liveConversionPendingReading;
     std::wstring _liveConversionPendingLeftContext;
     std::wstring _liveConversionLatestRequestedReading;
@@ -286,9 +292,15 @@ private:
     std::uint64_t _liveConversionLatestRequestedVersion;
     std::uint64_t _liveConversionCompletedVersion;
     bool _liveConversionCompletedIsFinal;
+    std::wstring _liveZenzCandidateReading;
+    std::wstring _liveZenzCandidateLeftContext;
+    std::wstring _liveZenzCandidateSurface;
+    std::uint64_t _liveZenzCandidateVersion;
+    bool _liveZenzCandidateHasFinal;
     std::wstring _liveConversionSourceViewText;
     bool _liveConversionSourceViewBusy;
     std::wstring _converterSettingsSignature;
+    SumireKeymap::RuntimeKeymap _keymap;
 
     // 現在の composition セッション段階
     CompositionPhase _compositionPhase;

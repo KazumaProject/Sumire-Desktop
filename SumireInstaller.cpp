@@ -481,6 +481,9 @@ bool CopyPayloadFromDirectory(
     const std::filesystem::path dictionariesPath = FindExistingPathUpTree(
         sourceDirectory,
         {std::filesystem::path(L"dictionaries")});
+    const std::filesystem::path keymapsPath = FindExistingPathUpTree(
+        sourceDirectory,
+        {std::filesystem::path(L"keymaps")});
     const std::filesystem::path modelsPath = FindExistingPathUpTree(
         sourceDirectory,
         {std::filesystem::path(L"models")});
@@ -542,6 +545,17 @@ bool CopyPayloadFromDirectory(
         if (error != nullptr)
         {
             *error = L"Failed to copy the dictionaries directory.";
+        }
+        return false;
+    }
+
+    if (!keymapsPath.empty() &&
+        std::filesystem::exists(keymapsPath) &&
+        !SumireInstallUtil::CopyDirectoryRecursive(keymapsPath, installDirectory / L"keymaps"))
+    {
+        if (error != nullptr)
+        {
+            *error = L"Failed to copy the keymaps directory.";
         }
         return false;
     }
