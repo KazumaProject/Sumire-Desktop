@@ -146,6 +146,10 @@
     <ClInclude Include="KeymapStore.h" />
     <ClInclude Include="PersonNameLexicon.h" />
     <ClInclude Include="SumireSettingsStore.h" />
+    <ClInclude Include="SumireVersion.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="SumireSettings.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
