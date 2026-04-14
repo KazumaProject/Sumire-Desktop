@@ -7,13 +7,13 @@
 
 #include "Globals.h"
 #include "SumireSettingsStore.h"
+#include "SumireVersion.h"
 
 namespace
 {
 constexpr wchar_t kInstallDirValue[] = L"InstallDir";
 constexpr wchar_t kUninstallKeyPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SumireIME";
 constexpr wchar_t kAppFolderName[] = L"Sumire IME";
-constexpr wchar_t kPublisher[] = L"Sumire";
 
 using DllRegisterProc = HRESULT(STDAPICALLTYPE*)();
 
@@ -96,9 +96,9 @@ bool InvokeDllRegistration(const std::filesystem::path& dllPath, const char* exp
     return SUCCEEDED(hr);
 }
 
-void ScheduleDeleteOnReboot(const std::filesystem::path& path)
+bool ScheduleDeleteOnReboot(const std::filesystem::path& path)
 {
-    MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+    return MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT) != FALSE;
 }
 
 bool AreEquivalentPaths(const std::filesystem::path& lhs, const std::filesystem::path& rhs)
@@ -150,6 +150,24 @@ bool TryReplaceFile(const std::filesystem::path& sourceFile, const std::filesyst
 bool EqualsIgnoreCase(const wchar_t* lhs, const wchar_t* rhs)
 {
     return CompareStringOrdinal(lhs, -1, rhs, -1, TRUE) == CSTR_EQUAL;
+}
+
+std::wstring QuoteCommandLineArgument(const std::filesystem::path& path)
+{
+    std::wstring value = path.wstring();
+    std::wstring quoted;
+    quoted.reserve(value.size() + 2);
+    quoted.push_back(L'"');
+    for (wchar_t ch : value)
+    {
+        if (ch == L'"')
+        {
+            quoted.push_back(L'\\');
+        }
+        quoted.push_back(ch);
+    }
+    quoted.push_back(L'"');
+    return quoted;
 }
 }
 
@@ -374,6 +392,43 @@ bool DeleteDirectoryBestEffort(const std::filesystem::path& directory, bool* reb
         ec.clear();
     }
 
+    if (std::filesystem::exists(directory, ec) && !ec)
+    {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(
+                 directory,
+                 std::filesystem::directory_options::skip_permission_denied,
+                 ec))
+        {
+            if (ec)
+            {
+                break;
+            }
+
+            if (entry.is_directory())
+            {
+                continue;
+            }
+
+            ScheduleDeleteOnReboot(entry.path());
+            if (rebootRequired != nullptr)
+            {
+                *rebootRequired = true;
+            }
+        }
+
+        ec.clear();
+        std::filesystem::remove_all(directory, ec);
+        if (std::filesystem::exists(directory, ec) && !ec)
+        {
+            ScheduleDeleteOnReboot(directory);
+            if (rebootRequired != nullptr)
+            {
+                *rebootRequired = true;
+            }
+        }
+        ec.clear();
+    }
+
     return true;
 }
 
@@ -571,11 +626,17 @@ bool WriteInstallMetadata(const std::filesystem::path& installDirectory, const s
         return false;
     }
 
+    const std::wstring uninstallCommand = QuoteCommandLineArgument(uninstallExePath);
+    const std::wstring quietUninstallCommand = uninstallCommand + L" /quiet";
+
     success = success &&
-        WriteStringValue(uninstallKey, L"DisplayName", L"Sumire IME") &&
-        WriteStringValue(uninstallKey, L"Publisher", kPublisher) &&
+        WriteStringValue(uninstallKey, L"DisplayName", SUMIRE_PRODUCT_NAME_W) &&
+        WriteStringValue(uninstallKey, L"DisplayVersion", SUMIRE_VERSION_WSTRING) &&
+        WriteStringValue(uninstallKey, L"Publisher", SUMIRE_COMPANY_NAME_W) &&
+        WriteStringValue(uninstallKey, L"DisplayIcon", ToWideString(uninstallExePath)) &&
         WriteStringValue(uninstallKey, L"InstallLocation", ToWideString(installDirectory)) &&
-        WriteStringValue(uninstallKey, L"UninstallString", ToWideString(uninstallExePath)) &&
+        WriteStringValue(uninstallKey, L"UninstallString", uninstallCommand) &&
+        WriteStringValue(uninstallKey, L"QuietUninstallString", quietUninstallCommand) &&
         WriteDwordValue(uninstallKey, L"NoModify", 1) &&
         WriteDwordValue(uninstallKey, L"NoRepair", 1);
 

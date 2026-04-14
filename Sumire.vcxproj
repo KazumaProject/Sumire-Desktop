@@ -218,6 +218,7 @@
     <ClInclude Include="Resource.h" />
     <ClInclude Include="RomajiKanaConverter.h" />
     <ClInclude Include="SumireSettingsStore.h" />
+    <ClInclude Include="SumireVersion.h" />
     <ClInclude Include="TextService.h" />
     <ClInclude Include="ZenzClient.h" />
     <ClInclude Include="ZenzProtocol.h" />

@@ -148,6 +148,10 @@
     <ClInclude Include="Globals.h" />
     <ClInclude Include="SumireInstallUtil.h" />
     <ClInclude Include="SumireSettingsStore.h" />
+    <ClInclude Include="SumireVersion.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="SumireInstaller.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

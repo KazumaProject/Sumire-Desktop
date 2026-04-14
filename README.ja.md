@@ -45,6 +45,22 @@ GitHub Releases には自己完結した `*-Setup.exe` をアップロードす�
 - 既定の `zenz` モデルをインストール中にダウンロードするか
 - `Sumire Settings` のデスクトップショートカットを作成するか
 
+Microsoft Store 向けの MSI/EXE 申請では、インストーラー引数に `/quiet /store` を指定してください。このモードでは UI を表示せず、インストール中の既定 `zenz` モデルダウンロードを無効化し、デスクトップショートカットも作成しません。アンインストール引数が必要な場合は `/quiet` を指定してください。
+
+Store 申請前には、生成した `*-Setup.exe` と同梱される EXE/DLL をコード署名し、HTTPS のバージョン固定 URL に配置してください。
+
+署名済みの Store 向けリリースを作る場合は、ビルド後に `scripts/sign-release.ps1` を使用します。証明書ストアの thumbprint を使う例:
+
+```powershell
+.\scripts\sign-release.ps1 -Version 0.1.0 -Platform x64 -Configuration Release -CertificateThumbprint "<SHA1 thumbprint>"
+```
+
+PFX ファイルを使う例:
+
+```powershell
+.\scripts\sign-release.ps1 -Version 0.1.0 -Platform x64 -Configuration Release -PfxPath "C:\path\codesign.pfx" -PfxPassword "<password>"
+```
+
 ## ローカルビルド
 
 前提:

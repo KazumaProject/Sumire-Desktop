@@ -149,7 +149,11 @@
     <ClCompile Include="third_party\llama.cpp\unicode.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="SumireVersion.h" />
     <ClInclude Include="ZenzProtocol.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="SumireZenzService.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

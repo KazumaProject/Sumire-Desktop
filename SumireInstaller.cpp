@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -57,6 +58,7 @@ struct WizardState
     bool installSucceeded = false;
     bool createStartMenuShortcuts = true;
     bool createDesktopSettingsShortcut = true;
+    bool allowModelDownloadDuringInstall = true;
     bool downloadModelDuringInstall = true;
     bool launchSettingsAfterFinish = false;
     bool installStarted = false;
@@ -76,6 +78,30 @@ struct WizardState
     HWND nextButton = nullptr;
     HWND cancelButton = nullptr;
     HWND status = nullptr;
+};
+
+struct InstallerOptions
+{
+    bool silent = false;
+    bool allowModelDownloadDuringInstall = true;
+    bool createStartMenuShortcuts = true;
+    bool createDesktopSettingsShortcut = true;
+    std::filesystem::path installDirectory;
+};
+
+struct InstallOptions
+{
+    std::filesystem::path installDirectory;
+    bool createStartMenuShortcuts = true;
+    bool createDesktopSettingsShortcut = true;
+    bool downloadModelDuringInstall = true;
+};
+
+struct InstallResult
+{
+    bool success = false;
+    std::wstring error;
+    std::filesystem::path installedSettingsPath;
 };
 
 struct EmbeddedPayloadEntry
@@ -108,6 +134,97 @@ void SetChecked(HWND hwnd, bool checked)
 bool IsChecked(HWND hwnd)
 {
     return SendMessageW(hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
+bool IsSwitch(const std::wstring& argument, std::initializer_list<const wchar_t*> names)
+{
+    for (const wchar_t* name : names)
+    {
+        if (CompareStringOrdinal(argument.c_str(), -1, name, -1, TRUE) == CSTR_EQUAL)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+InstallerOptions ParseInstallerOptions()
+{
+    InstallerOptions options;
+    bool storeMode = false;
+
+    int argumentCount = 0;
+    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    if (arguments == nullptr)
+    {
+        return options;
+    }
+
+    for (int index = 1; index < argumentCount; ++index)
+    {
+        const std::wstring argument = arguments[index] != nullptr ? arguments[index] : L"";
+        if (IsSwitch(argument, {L"/store", L"-store", L"--store",
+                               L"/no-model-download", L"-no-model-download", L"--no-model-download",
+                               L"/offline", L"-offline", L"--offline"}))
+        {
+            options.allowModelDownloadDuringInstall = false;
+            if (IsSwitch(argument, {L"/store", L"-store", L"--store"}))
+            {
+                storeMode = true;
+            }
+        }
+        else if (IsSwitch(argument, {L"/quiet", L"-quiet", L"--quiet",
+                                    L"/silent", L"-silent", L"--silent",
+                                    L"/verysilent", L"-verysilent", L"--verysilent",
+                                    L"/S", L"-S"}))
+        {
+            options.silent = true;
+        }
+        else if (IsSwitch(argument, {L"/no-shortcuts", L"-no-shortcuts", L"--no-shortcuts"}))
+        {
+            options.createStartMenuShortcuts = false;
+            options.createDesktopSettingsShortcut = false;
+        }
+        else if (IsSwitch(argument, {L"/no-desktop-shortcut", L"-no-desktop-shortcut", L"--no-desktop-shortcut"}))
+        {
+            options.createDesktopSettingsShortcut = false;
+        }
+        else
+        {
+            constexpr const wchar_t* installDirPrefixes[] = {
+                L"/install-dir=",
+                L"-install-dir=",
+                L"--install-dir=",
+                L"/dir=",
+                L"-dir=",
+                L"--dir="};
+            for (const wchar_t* prefix : installDirPrefixes)
+            {
+                const std::wstring prefixText(prefix);
+                if (argument.size() > prefixText.size() &&
+                    CompareStringOrdinal(
+                        argument.c_str(),
+                        static_cast<int>(prefixText.size()),
+                        prefixText.c_str(),
+                        static_cast<int>(prefixText.size()),
+                        TRUE) == CSTR_EQUAL)
+                {
+                    options.installDirectory = argument.substr(prefixText.size());
+                    break;
+                }
+            }
+        }
+    }
+
+    LocalFree(arguments);
+
+    if (storeMode || options.silent)
+    {
+        options.createDesktopSettingsShortcut = false;
+    }
+
+    return options;
 }
 
 bool ReadExact(std::ifstream& input, void* buffer, std::size_t size)
@@ -670,7 +787,7 @@ void UpdateWizardPage(HWND hwnd)
     SetVisible(state->browseButton, showOptions);
     SetVisible(state->startMenuShortcutCheck, showOptions);
     SetVisible(state->desktopSettingsShortcutCheck, showOptions);
-    SetVisible(state->downloadModelCheck, showOptions);
+    SetVisible(state->downloadModelCheck, showOptions && state->allowModelDownloadDuringInstall);
     SetVisible(state->launchSettingsCheck, showLaunchSettings);
 
     switch (state->page)
@@ -690,10 +807,20 @@ void UpdateWizardPage(HWND hwnd)
 
     case WizardPage::Options:
         SetWindowTextW(state->title, L"Install options");
-        SetWindowTextW(
-            state->body,
-            L"Choose where to install Sumire IME and whether to create shortcuts.\r\n"
-            L"You can also download the default zenz model during installation.");
+        if (state->allowModelDownloadDuringInstall)
+        {
+            SetWindowTextW(
+                state->body,
+                L"Choose where to install Sumire IME and whether to create shortcuts.\r\n"
+                L"You can also download the default zenz model during installation.");
+        }
+        else
+        {
+            SetWindowTextW(
+                state->body,
+                L"Choose where to install Sumire IME and whether to create shortcuts.\r\n"
+                L"This installer will not download the default zenz model during installation.");
+        }
         SetWindowTextW(state->nextButton, L"Install");
         EnableWindow(state->backButton, TRUE);
         EnableWindow(state->nextButton, TRUE);
@@ -739,34 +866,59 @@ void UpdateWizardPage(HWND hwnd)
     }
 }
 
-void RunInstall(HWND hwnd)
+void SetInstallStatus(HWND statusWindow, const wchar_t* text)
 {
-    WizardState* state = GetWizardState(hwnd);
-    if (state == nullptr || state->installStarted)
+    if (statusWindow != nullptr)
+    {
+        SetWindowTextW(statusWindow, text);
+        UpdateWindow(statusWindow);
+    }
+}
+
+void AppendInstallLog(const std::wstring& message)
+{
+    const std::filesystem::path logDirectory = SumireInstallUtil::GetDefaultInstallDirectory();
+    std::error_code ec;
+    std::filesystem::create_directories(logDirectory, ec);
+    if (ec)
     {
         return;
     }
 
-    state->installStarted = true;
-    SetWindowTextW(state->status, L"Starting setup...");
-    UpdateWindow(hwnd);
+    std::wofstream log(logDirectory / L"install.log", std::ios::app);
+    if (!log)
+    {
+        return;
+    }
 
-    wchar_t installPath[MAX_PATH] = {};
-    GetWindowTextW(state->installPathEdit, installPath, ARRAYSIZE(installPath));
-    state->installDirectory = installPath;
-    state->createStartMenuShortcuts = IsChecked(state->startMenuShortcutCheck);
-    state->createDesktopSettingsShortcut = IsChecked(state->desktopSettingsShortcutCheck);
-    state->downloadModelDuringInstall = IsChecked(state->downloadModelCheck);
+    std::time_t now = std::time(nullptr);
+    std::tm localTime = {};
+    localtime_s(&localTime, &now);
+
+    wchar_t timestamp[32] = {};
+    wcsftime(timestamp, ARRAYSIZE(timestamp), L"%Y-%m-%d %H:%M:%S", &localTime);
+    log << L"[" << timestamp << L"] " << message << L"\n";
+}
+
+InstallResult ExecuteInstall(const InstallOptions& options, HWND statusWindow)
+{
+    InstallResult result;
+
+    SetInstallStatus(statusWindow, L"Starting setup...");
 
     const std::filesystem::path installerPath = SumireInstallUtil::GetExecutablePath();
     const std::filesystem::path sourceDirectory = SumireInstallUtil::GetExecutableDirectory();
-    const std::filesystem::path installDirectory = std::filesystem::path(state->installDirectory);
+    const std::filesystem::path installDirectory = options.installDirectory.empty()
+        ? SumireInstallUtil::GetDefaultInstallDirectory()
+        : options.installDirectory;
 
     const std::filesystem::path existingInstalledDll = FindFirstExistingFile(
         installDirectory,
         {L"Sumite-Desktop.dll", L"TextService.dll"});
     if (!existingInstalledDll.empty())
     {
+        SumireInstallUtil::StopProcessesByName(L"SumireZenzService.exe");
+        SumireInstallUtil::StopProcessesByName(L"ctfmon.exe");
         SumireInstallUtil::DeactivateTextServiceProfile();
         SumireInstallUtil::UnregisterTextServiceDll(existingInstalledDll);
     }
@@ -774,19 +926,17 @@ void RunInstall(HWND hwnd)
     SumireInstallUtil::StopProcessesByName(L"SumireZenzService.exe");
     SumireInstallUtil::StopProcessesByName(L"ctfmon.exe");
 
-    std::wstring error;
     bool hasEmbeddedPayload = false;
-    bool success = CopyEmbeddedPayload(installerPath, installDirectory, &error, &hasEmbeddedPayload);
+    bool success = CopyEmbeddedPayload(installerPath, installDirectory, &result.error, &hasEmbeddedPayload);
     if (!hasEmbeddedPayload)
     {
-        success = CopyPayloadFromDirectory(sourceDirectory, installDirectory, &error);
+        success = CopyPayloadFromDirectory(sourceDirectory, installDirectory, &result.error);
     }
 
-    if (success && state->downloadModelDuringInstall)
+    if (success && options.downloadModelDuringInstall)
     {
-        SetWindowTextW(state->status, L"Downloading the default zenz model...");
-        UpdateWindow(hwnd);
-        success = DownloadDefaultZenzModel(installDirectory, &error);
+        SetInstallStatus(statusWindow, L"Downloading the default zenz model...");
+        success = DownloadDefaultZenzModel(installDirectory, &result.error);
     }
 
     const std::filesystem::path installedDll = FindFirstExistingFile(
@@ -798,19 +948,19 @@ void RunInstall(HWND hwnd)
     if (success && (installedDll.empty() || !SumireInstallUtil::RegisterTextServiceDll(installedDll)))
     {
         success = false;
-        error = L"Failed to register the IME DLL.";
+        result.error = L"Failed to register the IME DLL.";
     }
 
     if (success && !SumireInstallUtil::ActivateTextServiceProfile())
     {
         success = false;
-        error = L"Failed to activate the IME profile.";
+        result.error = L"Failed to activate the IME profile.";
     }
 
     if (success && !SumireInstallUtil::WriteInstallMetadata(installDirectory, installedUninstaller))
     {
         success = false;
-        error = L"Failed to write install metadata.";
+        result.error = L"Failed to write install metadata.";
     }
 
     if (success)
@@ -822,7 +972,7 @@ void RunInstall(HWND hwnd)
         const std::filesystem::path desktopSettingsShortcut =
             SumireInstallUtil::GetDesktopShortcutPath(kSettingsShortcutFileName);
 
-        if (state->createStartMenuShortcuts)
+        if (options.createStartMenuShortcuts)
         {
             SumireInstallUtil::CreateShortcut(
                 startMenuSettingsShortcut,
@@ -841,7 +991,7 @@ void RunInstall(HWND hwnd)
             SumireInstallUtil::RemoveShortcut(startMenuUninstallShortcut);
         }
 
-        if (state->createDesktopSettingsShortcut)
+        if (options.createDesktopSettingsShortcut)
         {
             SumireInstallUtil::CreateShortcut(
                 desktopSettingsShortcut,
@@ -855,27 +1005,77 @@ void RunInstall(HWND hwnd)
         }
     }
 
-    state->installedSettingsPath = installedSettings.wstring();
-    state->installSucceeded = success;
+    if (!success && result.error.empty())
+    {
+        result.error = L"Install failed. The IME DLL may still be in use. Sign out of Windows and try again.";
+    }
+
+    result.success = success;
+    result.installedSettingsPath = installedSettings;
+    return result;
+}
+
+void RunInstall(HWND hwnd)
+{
+    WizardState* state = GetWizardState(hwnd);
+    if (state == nullptr || state->installStarted)
+    {
+        return;
+    }
+
+    state->installStarted = true;
+
+    wchar_t installPath[MAX_PATH] = {};
+    GetWindowTextW(state->installPathEdit, installPath, ARRAYSIZE(installPath));
+    state->installDirectory = installPath;
+    state->createStartMenuShortcuts = IsChecked(state->startMenuShortcutCheck);
+    state->createDesktopSettingsShortcut = IsChecked(state->desktopSettingsShortcutCheck);
+    state->downloadModelDuringInstall =
+        state->allowModelDownloadDuringInstall && IsChecked(state->downloadModelCheck);
+
+    InstallOptions options;
+    options.installDirectory = std::filesystem::path(state->installDirectory);
+    options.createStartMenuShortcuts = state->createStartMenuShortcuts;
+    options.createDesktopSettingsShortcut = state->createDesktopSettingsShortcut;
+    options.downloadModelDuringInstall = state->downloadModelDuringInstall;
+
+    const InstallResult result = ExecuteInstall(options, state->status);
+    state->installedSettingsPath = result.installedSettingsPath.wstring();
+    state->installSucceeded = result.success;
     state->installStarted = false;
     state->page = WizardPage::Finish;
 
-    if (success)
+    if (result.success)
     {
         SetChecked(state->launchSettingsCheck, false);
         SetWindowTextW(state->status, L"Setup completed successfully.");
     }
     else
     {
-        if (error.empty())
-        {
-            error = L"Install failed. The IME DLL may still be in use. Sign out of Windows and try again.";
-        }
-
-        SetWindowTextW(state->status, error.c_str());
+        SetWindowTextW(state->status, result.error.c_str());
     }
 
     UpdateWizardPage(hwnd);
+}
+
+int RunSilentInstall(const InstallerOptions& parsedOptions)
+{
+    InstallOptions options;
+    options.installDirectory = parsedOptions.installDirectory;
+    options.createStartMenuShortcuts = parsedOptions.createStartMenuShortcuts;
+    options.createDesktopSettingsShortcut = parsedOptions.createDesktopSettingsShortcut;
+    options.downloadModelDuringInstall = parsedOptions.allowModelDownloadDuringInstall;
+
+    const InstallResult result = ExecuteInstall(options, nullptr);
+    if (!result.success)
+    {
+        OutputDebugStringW((L"Sumire installer failed: " + result.error + L"\r\n").c_str());
+        AppendInstallLog(L"Silent install failed: " + result.error);
+        return 1;
+    }
+
+    AppendInstallLog(L"Silent install completed successfully.");
+    return 0;
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -885,7 +1085,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
     case WM_CREATE:
         {
             auto* state = new WizardState();
-            state->installDirectory = SumireInstallUtil::GetDefaultInstallDirectory().wstring();
+            const auto* createStruct = reinterpret_cast<CREATESTRUCTW*>(lParam);
+            const auto* options = createStruct != nullptr
+                ? static_cast<const InstallerOptions*>(createStruct->lpCreateParams)
+                : nullptr;
+            if (options != nullptr)
+            {
+                state->allowModelDownloadDuringInstall = options->allowModelDownloadDuringInstall;
+                state->downloadModelDuringInstall = options->allowModelDownloadDuringInstall;
+                state->createStartMenuShortcuts = options->createStartMenuShortcuts;
+                state->createDesktopSettingsShortcut = options->createDesktopSettingsShortcut;
+                if (!options->installDirectory.empty())
+                {
+                    state->installDirectory = options->installDirectory.wstring();
+                }
+            }
+            if (state->installDirectory.empty())
+            {
+                state->installDirectory = SumireInstallUtil::GetDefaultInstallDirectory().wstring();
+            }
             SetWizardState(hwnd, state);
 
             state->title = CreateWindowW(
@@ -966,7 +1184,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 ControlMenu(IdStartMenuShortcutCheck),
                 nullptr,
                 nullptr);
-            SetChecked(state->startMenuShortcutCheck, true);
+            SetChecked(state->startMenuShortcutCheck, state->createStartMenuShortcuts);
 
             state->desktopSettingsShortcutCheck = CreateWindowW(
                 L"BUTTON",
@@ -980,7 +1198,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 ControlMenu(IdDesktopSettingsShortcutCheck),
                 nullptr,
                 nullptr);
-            SetChecked(state->desktopSettingsShortcutCheck, true);
+            SetChecked(state->desktopSettingsShortcutCheck, state->createDesktopSettingsShortcut);
 
             state->downloadModelCheck = CreateWindowW(
                 L"BUTTON",
@@ -994,7 +1212,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 ControlMenu(IdDownloadModelCheck),
                 nullptr,
                 nullptr);
-            SetChecked(state->downloadModelCheck, true);
+            SetChecked(state->downloadModelCheck, state->downloadModelDuringInstall);
 
             state->status = CreateWindowW(
                 L"STATIC",
@@ -1154,6 +1372,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
 {
+    const InstallerOptions options = ParseInstallerOptions();
+    if (options.silent)
+    {
+        return RunSilentInstall(options);
+    }
+
     WNDCLASSW windowClass = {};
     windowClass.lpfnWndProc = WindowProc;
     windowClass.hInstance = instance;
@@ -1177,7 +1401,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow)
         nullptr,
         nullptr,
         instance,
-        nullptr);
+        const_cast<InstallerOptions*>(&options));
     if (hwnd == nullptr)
     {
         return 1;
