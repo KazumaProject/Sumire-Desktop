@@ -33,11 +33,21 @@ jobs:
             -Platform "x64" `
             -Configuration "Release" `
             -OutputDir "$env:RUNNER_TEMP/sumire-release"
+
+          $setupFiles = Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/sumire-release" -Filter "*-Setup.exe" -File
+          if ($setupFiles.Count -eq 0) {
+            throw "No setup exe was created."
+          }
+
+          foreach ($setupFile in $setupFiles) {
+            $zipPath = Join-Path $setupFile.DirectoryName "$($setupFile.BaseName).zip"
+            Compress-Archive -LiteralPath $setupFile.FullName -DestinationPath $zipPath -Force
+          }
         shell: pwsh
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/sumire-release/*-Setup.exe
+            ${{ runner.temp }}/sumire-release/*-Setup.zip
           generate_release_notes: true
